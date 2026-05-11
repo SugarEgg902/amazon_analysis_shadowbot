@@ -1,0 +1,146 @@
+from primary_agent import (
+    DASHSCOPE_BASE_URL,
+    DASHSCOPE_MODEL,
+    build_primary_agent_client,
+    decide_next_step,
+    summarize_workflow_result,
+)
+from session_store import ChatMessage, SessionSlots
+
+
+def test_build_primary_agent_client_requires_dashscope_api_key(monkeypatch):
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+
+    try:
+        build_primary_agent_client()
+    except RuntimeError as exc:
+        assert "DASHSCOPE_API_KEY" in str(exc)
+    else:
+        raise AssertionError("RuntimeError was not raised")
+
+
+def test_primary_agent_constants_match_dashscope_configuration():
+    assert DASHSCOPE_BASE_URL == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert DASHSCOPE_MODEL == "glm-4.6"
+
+
+def test_decide_next_step_returns_follow_up_question_when_slots_missing():
+    def fake_llm(messages, tools):
+        assert tools[0]["function"]["name"] == "run_amazon_competitor_analysis"
+        assert any(message["role"] == "user" for message in messages)
+        return {
+            "type": "assistant",
+            "message": "你想分析哪个平台？目前我支持 Amazon。",
+            "slot_updates": {"brand": "Blackview"},
+        }
+
+    decision = decide_next_step(
+        messages=[ChatMessage(role="user", content="帮我看一下 Blackview 的竞品")],
+        slots=SessionSlots(),
+        tool_schemas=[
+            {
+                "type": "function",
+                "function": {"name": "run_amazon_competitor_analysis"},
+            }
+        ],
+        llm_call=fake_llm,
+    )
+
+    assert decision == {
+        "type": "assistant",
+        "message": "你想分析哪个平台？目前我支持 Amazon。",
+        "slot_updates": {"brand": "Blackview"},
+    }
+
+
+def test_decide_next_step_returns_tool_call_when_slots_are_complete():
+    def fake_llm(_messages, _tools):
+        return {
+            "type": "tool_call",
+            "tool_name": "run_amazon_competitor_analysis",
+            "arguments": {"brand": "Blackview", "count": 5},
+            "assistant_message": "好的，我开始分析 Amazon 上的 Blackview 竞品。",
+            "slot_updates": {
+                "platform": "amazon",
+                "brand": "Blackview",
+                "count": 5,
+            },
+        }
+
+    decision = decide_next_step(
+        messages=[ChatMessage(role="user", content="看 Amazon 的 Blackview，5 个")],
+        slots=SessionSlots(platform="amazon"),
+        tool_schemas=[
+            {
+                "type": "function",
+                "function": {"name": "run_amazon_competitor_analysis"},
+            }
+        ],
+        llm_call=fake_llm,
+    )
+
+    assert decision["type"] == "tool_call"
+    assert decision["tool_name"] == "run_amazon_competitor_analysis"
+    assert decision["arguments"] == {"brand": "Blackview", "count": 5}
+    assert decision["slot_updates"]["platform"] == "amazon"
+
+
+def test_decide_next_step_rejects_unsupported_tool_call():
+    def fake_llm(_messages, _tools):
+        return {
+            "type": "tool_call",
+            "tool_name": "run_temu_competitor_analysis",
+            "arguments": {"brand": "Blackview", "count": 5},
+            "slot_updates": {
+                "platform": "temu",
+                "brand": "Blackview",
+                "count": 5,
+            },
+        }
+
+    decision = decide_next_step(
+        messages=[ChatMessage(role="user", content="看 Temu 的 Blackview，5 个")],
+        slots=SessionSlots(),
+        tool_schemas=[
+            {
+                "type": "function",
+                "function": {"name": "run_amazon_competitor_analysis"},
+            }
+        ],
+        llm_call=fake_llm,
+    )
+
+    assert decision == {
+        "type": "assistant",
+        "message": "目前只支持 Amazon 竞品分析，请改用 Amazon。",
+        "slot_updates": {
+            "platform": "temu",
+            "brand": "Blackview",
+            "count": 5,
+        },
+    }
+
+
+def test_summarize_workflow_result_returns_final_assistant_copy():
+    def fake_llm(messages, tools):
+        assert tools == []
+        assert any(message["role"] == "user" for message in messages)
+        return {
+            "type": "assistant",
+            "message": "已完成 5 个 Amazon 竞品分析，CSV 已生成并可下载。",
+        }
+
+    summary = summarize_workflow_result(
+        tool_name="run_amazon_competitor_analysis",
+        tool_result={
+            "platform": "amazon",
+            "brand": "Blackview",
+            "count": 5,
+            "summary": "已完成 5 个竞品分析",
+            "filename": "amazon_blackview_5.csv",
+            "download_url": "/api/download/amazon_blackview_5.csv",
+        },
+        llm_call=fake_llm,
+    )
+
+    assert summary == "已完成 5 个 Amazon 竞品分析，CSV 已生成并可下载。"
