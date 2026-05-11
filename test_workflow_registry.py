@@ -1,5 +1,6 @@
 import asyncio
 
+import workflow_registry
 from competitor_workflows import run_amazon_competitor_analysis
 from workflow_registry import build_default_registry
 
@@ -40,6 +41,43 @@ def test_default_registry_exposes_amazon_workflow_schema():
 
     assert len(schemas) == 1
     assert schemas[0]["function"]["name"] == "run_amazon_competitor_analysis"
+
+
+def test_default_registry_dispatches_to_amazon_workflow(monkeypatch):
+    events = []
+
+    async def fake_emit(payload):
+        events.append(payload)
+
+    async def fake_handler(*, brand, count, emit):
+        await emit(
+            {
+                "type": "tool_status",
+                "tool": "run_amazon_competitor_analysis",
+                "message": "dispatch-ok",
+            }
+        )
+        return {"brand": brand, "count": count}
+
+    monkeypatch.setattr(workflow_registry, "run_amazon_competitor_analysis", fake_handler)
+    registry = workflow_registry.build_default_registry()
+
+    result = asyncio.run(
+        registry.call_tool(
+            "run_amazon_competitor_analysis",
+            {"brand": "Blackview", "count": 1},
+            fake_emit,
+        )
+    )
+
+    assert events == [
+        {
+            "type": "tool_status",
+            "tool": "run_amazon_competitor_analysis",
+            "message": "dispatch-ok",
+        }
+    ]
+    assert result == {"brand": "Blackview", "count": 1}
 
 
 def test_run_amazon_competitor_analysis_emits_status_and_returns_artifact(tmp_path):
@@ -87,3 +125,50 @@ def test_run_amazon_competitor_analysis_emits_status_and_returns_artifact(tmp_pa
     assert result["preview_rows"] == [[row[column] for column in result["preview_columns"]]]
     assert result["filename"] == "out.csv"
     assert result["download_url"] == "/api/download/out.csv"
+
+
+def test_run_amazon_competitor_analysis_emits_warning_when_review_summary_fails(tmp_path):
+    events = []
+    captured = {}
+    product = _sample_product()
+    row = _sample_row()
+
+    async def fake_emit(payload):
+        events.append(payload)
+
+    async def fake_scrape(_brand, max_pages=2, max_valid=5, headless=False):
+        return [product]
+
+    async def fake_reviews(_asin, max_reviews=100):
+        raise RuntimeError("review summary failed")
+
+    def fake_row_builder(**kwargs):
+        captured["review_summary"] = kwargs["review_summary"]
+        return row
+
+    result = asyncio.run(
+        run_amazon_competitor_analysis(
+            brand="Blackview",
+            count=1,
+            emit=fake_emit,
+            scrape_products=fake_scrape,
+            summarize_reviews_fn=fake_reviews,
+            build_row_fn=fake_row_builder,
+            write_csv_fn=lambda rows, brand, count: tmp_path / "out.csv",
+            download_url_builder=lambda path: f"/api/download/{path.name}",
+        )
+    )
+
+    assert captured["review_summary"] == {"pros": [], "cons": [], "overall": ""}
+    assert events[1] == {
+        "type": "tool_status",
+        "tool": "run_amazon_competitor_analysis",
+        "message": "正在分析 B0TEST1234 ...",
+    }
+    assert events[2] == {
+        "type": "tool_status",
+        "tool": "run_amazon_competitor_analysis",
+        "level": "warning",
+        "message": "B0TEST1234 的评论总结失败，已使用空摘要继续。",
+    }
+    assert result["filename"] == "out.csv"

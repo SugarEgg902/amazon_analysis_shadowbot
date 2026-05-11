@@ -64,6 +64,14 @@ async def run_amazon_competitor_analysis(
         try:
             review_summary = await summarize_reviews_fn(asin)
         except Exception:
+            await emit(
+                {
+                    "type": "tool_status",
+                    "tool": "run_amazon_competitor_analysis",
+                    "level": "warning",
+                    "message": f"{asin} 的评论总结失败，已使用空摘要继续。",
+                }
+            )
             review_summary = {"pros": [], "cons": [], "overall": ""}
 
         rows.append(
