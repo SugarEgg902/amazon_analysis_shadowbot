@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from dataclasses import dataclass
 
 from primary_agent import decide_next_step, summarize_workflow_result
@@ -13,11 +14,27 @@ WORKFLOW_REGISTRY = build_default_registry()
 RUNS: dict[str, "AgentRun"] = {}
 
 
+class EventQueue:
+    def __init__(self):
+        self._items = deque()
+
+    async def put(self, payload: dict) -> None:
+        self._items.append(payload)
+
+    def get_nowait(self) -> dict:
+        if not self._items:
+            raise asyncio.QueueEmpty
+        return self._items.popleft()
+
+    def empty(self) -> bool:
+        return not self._items
+
+
 @dataclass
 class AgentRun:
     run_id: str
     session_id: str
-    queue: asyncio.Queue
+    queue: EventQueue
 
 
 def new_session(*, session_store: SessionStore = SESSION_STORE):
@@ -44,12 +61,18 @@ def new_run(
     *,
     session_store: SessionStore = SESSION_STORE,
     runs: dict[str, AgentRun] = RUNS,
+    queue_factory=EventQueue,
 ) -> AgentRun:
-    session_store.append_message(session_id, "user", message)
     run_id = session_store.start_run(session_id)
-    run = AgentRun(run_id=run_id, session_id=session_id, queue=asyncio.Queue())
-    runs[run.run_id] = run
-    return run
+    try:
+        run = AgentRun(run_id=run_id, session_id=session_id, queue=queue_factory())
+        runs[run.run_id] = run
+        session_store.append_message(session_id, "user", message)
+        return run
+    except Exception:
+        session_store.finish_run(session_id, run_id)
+        runs.pop(run_id, None)
+        raise
 
 
 async def emit_event(queue: asyncio.Queue, payload: dict) -> None:
@@ -68,10 +91,17 @@ def build_artifact_event(result: dict) -> dict:
     }
 
 
+def build_error_event(message: str) -> dict:
+    return {
+        "type": "error",
+        "message": message,
+    }
+
+
 async def run_session_message(
     session_id: str,
     run_id: str,
-    queue: asyncio.Queue,
+    queue: EventQueue,
     *,
     session_store: SessionStore = SESSION_STORE,
     workflow_registry=WORKFLOW_REGISTRY,
@@ -80,35 +110,38 @@ async def run_session_message(
     runs: dict[str, AgentRun] = RUNS,
 ) -> None:
     try:
-        session = session_store.get_session(session_id)
-        tool_schemas = workflow_registry.get_tool_schemas() if workflow_registry is not None else []
-        decision = decide_next_step_fn(session.messages, session.slots, tool_schemas)
+        try:
+            session = session_store.get_session(session_id)
+            tool_schemas = workflow_registry.get_tool_schemas() if workflow_registry is not None else []
+            decision = decide_next_step_fn(session.messages, session.slots, tool_schemas)
 
-        slot_updates = decision.get("slot_updates", {})
-        session_store.update_slots(session_id, **slot_updates)
+            slot_updates = decision.get("slot_updates", {})
+            session_store.update_slots(session_id, **slot_updates)
 
-        if decision["type"] == "assistant":
-            session_store.append_message(session_id, "assistant", decision["message"])
-            await emit_event(queue, {"type": "assistant", "message": decision["message"]})
+            if decision["type"] == "assistant":
+                session_store.append_message(session_id, "assistant", decision["message"])
+                await emit_event(queue, {"type": "assistant", "message": decision["message"]})
+                await emit_event(queue, {"type": "done"})
+                return
+
+            if decision.get("assistant_message"):
+                session_store.append_message(session_id, "assistant", decision["assistant_message"])
+                await emit_event(queue, {"type": "assistant", "message": decision["assistant_message"]})
+
+            result = await workflow_registry.call_tool(
+                decision["tool_name"],
+                decision["arguments"],
+                lambda payload: emit_event(queue, payload),
+            )
+            artifact_event = build_artifact_event(result)
+            await emit_event(queue, artifact_event)
+
+            final_message = summarize_result_fn(decision["tool_name"], result)
+            session_store.append_message(session_id, "assistant", final_message)
+            await emit_event(queue, {"type": "assistant", "message": final_message})
             await emit_event(queue, {"type": "done"})
-            return
-
-        if decision.get("assistant_message"):
-            session_store.append_message(session_id, "assistant", decision["assistant_message"])
-            await emit_event(queue, {"type": "assistant", "message": decision["assistant_message"]})
-
-        result = await workflow_registry.call_tool(
-            decision["tool_name"],
-            decision["arguments"],
-            lambda payload: emit_event(queue, payload),
-        )
-        artifact_event = build_artifact_event(result)
-        await emit_event(queue, artifact_event)
-
-        final_message = summarize_result_fn(decision["tool_name"], result)
-        session_store.append_message(session_id, "assistant", final_message)
-        await emit_event(queue, {"type": "assistant", "message": final_message})
-        await emit_event(queue, {"type": "done"})
+        except Exception as exc:
+            await emit_event(queue, build_error_event(f"任务执行失败: {exc}"))
     finally:
         session_store.finish_run(session_id, run_id)
         runs.pop(run_id, None)

@@ -1,7 +1,9 @@
 import asyncio
 
+import pytest
+
 from agent_service import RUNS, build_artifact_event, new_run, new_session, run_session_message
-from session_store import SessionStore
+from session_store import ConcurrentRunError, SessionStore
 
 
 def _collect(queue):
@@ -35,6 +37,53 @@ def test_new_run_appends_user_message_and_marks_session_active():
     saved = store.get_session(session.session_id)
     assert run.run_id == saved.active_run_id
     assert saved.messages[-1].content == "帮我看一下 Blackview 的竞品"
+
+
+def test_new_run_rejects_concurrent_run_without_appending_stray_user_message():
+    store = SessionStore()
+    session = store.create_session()
+
+    first_run = new_run(
+        session.session_id,
+        "先分析一次",
+        session_store=store,
+        runs={},
+    )
+
+    with pytest.raises(ConcurrentRunError):
+        new_run(
+            session.session_id,
+            "这条消息不应该被追加",
+            session_store=store,
+            runs={},
+        )
+
+    saved = store.get_session(session.session_id)
+    assert saved.active_run_id == first_run.run_id
+    assert [message.content for message in saved.messages] == ["先分析一次"]
+
+
+def test_new_run_rolls_back_active_run_if_queue_creation_fails():
+    store = SessionStore()
+    session = store.create_session()
+    runs = {}
+
+    def fail_queue_factory():
+        raise RuntimeError("queue init failed")
+
+    with pytest.raises(RuntimeError, match="queue init failed"):
+        new_run(
+            session.session_id,
+            "帮我看一下 Blackview 的竞品",
+            session_store=store,
+            runs=runs,
+            queue_factory=fail_queue_factory,
+        )
+
+    saved = store.get_session(session.session_id)
+    assert saved.active_run_id is None
+    assert saved.messages == []
+    assert runs == {}
 
 
 def test_run_session_message_emits_follow_up_assistant_and_done():
@@ -71,6 +120,57 @@ def test_run_session_message_emits_follow_up_assistant_and_done():
     saved = store.get_session(session.session_id)
     assert saved.slots.brand == "Blackview"
     assert saved.messages[-1].content == "你想分析哪个平台？目前我支持 Amazon。"
+
+
+def test_run_session_message_emits_error_and_cleans_up_on_tool_failure():
+    store = SessionStore()
+    session = store.create_session()
+    runs = {}
+    run = new_run(session.session_id, "看 Amazon 的 Blackview，5 个", session_store=store, runs=runs)
+
+    class FailingRegistry:
+        def get_tool_schemas(self):
+            return [{"type": "function", "function": {"name": "run_amazon_competitor_analysis"}}]
+
+        async def call_tool(self, name, arguments, emit):
+            del name, arguments, emit
+            raise RuntimeError("workflow boom")
+
+    def fake_decide(messages, slots, tool_schemas):
+        del messages, slots, tool_schemas
+        return {
+            "type": "tool_call",
+            "tool_name": "run_amazon_competitor_analysis",
+            "arguments": {"brand": "Blackview", "count": 5},
+            "assistant_message": "好的，我开始分析 Amazon 上的 Blackview 竞品。",
+            "slot_updates": {
+                "platform": "amazon",
+                "brand": "Blackview",
+                "count": 5,
+            },
+        }
+
+    asyncio.run(
+        run_session_message(
+            session.session_id,
+            run.run_id,
+            run.queue,
+            session_store=store,
+            workflow_registry=FailingRegistry(),
+            decide_next_step_fn=fake_decide,
+            summarize_result_fn=lambda tool_name, tool_result: "",
+            runs=runs,
+        )
+    )
+
+    queued = _collect(run.queue)
+    assert queued == [
+        {"type": "assistant", "message": "好的，我开始分析 Amazon 上的 Blackview 竞品。"},
+        {"type": "error", "message": "任务执行失败: workflow boom"},
+    ]
+    saved = store.get_session(session.session_id)
+    assert saved.active_run_id is None
+    assert run.run_id not in runs
 
 
 def test_run_session_message_emits_artifact_and_final_summary():
