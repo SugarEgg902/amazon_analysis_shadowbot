@@ -9,16 +9,16 @@ from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from agent_service import TASKS, new_task, run_task
+from agent_service import RUNS, discard_run, get_session_payload, new_run, new_session, run_session_message
 from artifacts import ARTIFACTS_DIR
 
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
-TERMINAL_EVENT_TYPES = {"result", "error"}
+TERMINAL_EVENT_TYPES = {"done", "error"}
 
 
-class ChatRequest(BaseModel):
+class MessageRequest(BaseModel):
     message: str
 
 
@@ -34,48 +34,33 @@ class SafeStaticFiles(StaticFiles):
         return await super().get_response(path, scope)
 
 
-def build_task_event_stream(task_id: str, task, tasks: dict):
+def build_run_event_stream(run_id: str, run, runs: dict, discard_run_fn=discard_run):
     async def event_stream():
         terminal_reached = False
         try:
             while True:
-                payload = await task.queue.get()
+                payload = await run.queue.get()
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                 if payload.get("type") in TERMINAL_EVENT_TYPES:
                     terminal_reached = True
                     break
         finally:
             if terminal_reached:
-                tasks.pop(task_id, None)
+                discard_run_fn(run_id, runs=runs)
 
     return event_stream()
-
-
-def schedule_task_cleanup(task_id: str, tasks: dict, delay_seconds: float = 60.0) -> None:
-    async def cleanup():
-        await asyncio.sleep(delay_seconds)
-        tasks.pop(task_id, None)
-
-    asyncio.create_task(cleanup())
-
-
-async def run_task_with_cleanup(message: str, task, tasks: dict, run_task_fn, cleanup_scheduler) -> None:
-    try:
-        await run_task_fn(message, task.queue)
-    except Exception as exc:
-        await task.queue.put({"type": "error", "message": f"任务执行失败: {exc}"})
-    finally:
-        cleanup_scheduler(task.task_id, tasks)
 
 
 def create_app(
     *,
     frontend_dir: Path = FRONTEND_DIR,
     artifacts_dir: Path = ARTIFACTS_DIR,
-    tasks: dict = TASKS,
-    new_task_fn=new_task,
-    run_task_fn=run_task,
-    cleanup_scheduler=schedule_task_cleanup,
+    runs: dict = RUNS,
+    new_session_fn=new_session,
+    get_session_payload_fn=get_session_payload,
+    new_run_fn=new_run,
+    run_session_message_fn=run_session_message,
+    discard_run_fn=discard_run,
 ):
     app = FastAPI()
     app.mount(
@@ -91,27 +76,35 @@ def create_app(
             return FileResponse(index_file)
         return HTMLResponse("<html><body><h1>竞品分析</h1></body></html>")
 
-    @app.post("/api/chat")
-    async def create_chat(request: ChatRequest):
-        task = new_task_fn(request.message)
-        asyncio.create_task(
-            run_task_with_cleanup(
-                request.message,
-                task,
-                tasks,
-                run_task_fn,
-                cleanup_scheduler,
-            )
-        )
-        return {"task_id": task.task_id}
+    @app.post("/api/sessions")
+    async def create_session_route():
+        session = new_session_fn()
+        return {"session_id": session.session_id}
 
-    @app.get("/api/chat/{task_id}/stream")
-    async def stream_chat(task_id: str):
-        task = tasks.get(task_id)
-        if task is None:
-            raise HTTPException(status_code=404, detail="Task not found")
+    @app.get("/api/sessions/{session_id}")
+    async def get_session_route(session_id: str):
+        try:
+            return get_session_payload_fn(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+
+    @app.post("/api/sessions/{session_id}/messages")
+    async def post_message(session_id: str, request: MessageRequest):
+        try:
+            run = new_run_fn(session_id, request.message)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+
+        asyncio.create_task(run_session_message_fn(session_id, run.run_id, run.queue))
+        return {"session_id": session_id, "run_id": run.run_id}
+
+    @app.get("/api/sessions/{session_id}/runs/{run_id}/stream")
+    async def stream_run(session_id: str, run_id: str):
+        run = runs.get(run_id)
+        if run is None or run.session_id != session_id:
+            raise HTTPException(status_code=404, detail="Run not found")
         return StreamingResponse(
-            build_task_event_stream(task_id, task, tasks),
+            build_run_event_stream(run_id, run, runs, discard_run_fn),
             media_type="text/event-stream",
         )
 
