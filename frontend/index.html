@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>竞品分析</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <main class="workspace">
+      <section class="composer-panel">
+        <div class="panel-heading">
+          <h2>发起分析</h2>
+          <p>示例：从亚马逊获取 Blackview 5 个竞品分析</p>
+        </div>
+
+        <form id="chat-form" class="composer" novalidate>
+          <label class="composer-label" for="message-input">任务内容</label>
+          <textarea
+            id="message-input"
+            name="message"
+            rows="4"
+            placeholder="从亚马逊获取 Blackview 5 个竞品分析"
+            required
+          >从亚马逊获取 Blackview 5 个竞品分析</textarea>
+          <div class="composer-actions">
+            <p id="form-status" class="form-status" aria-live="polite">等待新任务。</p>
+            <button id="submit-button" type="submit">开始分析</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="conversation-panel" aria-label="任务结果">
+        <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages"></ol>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
