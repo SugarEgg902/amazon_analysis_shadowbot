@@ -1,3 +1,6 @@
+import importlib
+import sys
+
 from primary_agent import (
     DASHSCOPE_BASE_URL,
     DASHSCOPE_MODEL,
@@ -22,6 +25,15 @@ def test_build_primary_agent_client_requires_dashscope_api_key(monkeypatch):
 def test_primary_agent_constants_match_dashscope_configuration():
     assert DASHSCOPE_BASE_URL == "https://dashscope.aliyuncs.com/compatible-mode/v1"
     assert DASHSCOPE_MODEL == "glm-4.6"
+
+
+def test_primary_agent_can_be_reloaded_without_openai_sdk_loaded(monkeypatch):
+    monkeypatch.setitem(sys.modules, "openai", None)
+
+    module = importlib.reload(importlib.import_module("primary_agent"))
+
+    assert module.DASHSCOPE_BASE_URL == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert module.DASHSCOPE_MODEL == "glm-4.6"
 
 
 def test_decide_next_step_returns_follow_up_question_when_slots_missing():
@@ -58,13 +70,9 @@ def test_decide_next_step_returns_tool_call_when_slots_are_complete():
         return {
             "type": "tool_call",
             "tool_name": "run_amazon_competitor_analysis",
-            "arguments": {"brand": "Blackview", "count": 5},
+            "arguments": {"brand": " Blackview ", "count": "5"},
             "assistant_message": "好的，我开始分析 Amazon 上的 Blackview 竞品。",
-            "slot_updates": {
-                "platform": "amazon",
-                "brand": "Blackview",
-                "count": 5,
-            },
+            "slot_updates": {},
         }
 
     decision = decide_next_step(
@@ -82,7 +90,66 @@ def test_decide_next_step_returns_tool_call_when_slots_are_complete():
     assert decision["type"] == "tool_call"
     assert decision["tool_name"] == "run_amazon_competitor_analysis"
     assert decision["arguments"] == {"brand": "Blackview", "count": 5}
-    assert decision["slot_updates"]["platform"] == "amazon"
+    assert decision["slot_updates"] == {
+        "platform": "amazon",
+        "brand": "Blackview",
+        "count": 5,
+    }
+
+
+def test_decide_next_step_falls_back_when_tool_call_arguments_are_unusable():
+    def fake_llm(_messages, _tools):
+        return {
+            "type": "tool_call",
+            "tool_name": "run_amazon_competitor_analysis",
+            "arguments": {"brand": " ", "count": "many"},
+            "slot_updates": {"platform": "amazon"},
+        }
+
+    decision = decide_next_step(
+        messages=[ChatMessage(role="user", content="看 Amazon 的竞品")],
+        slots=SessionSlots(),
+        tool_schemas=[
+            {
+                "type": "function",
+                "function": {"name": "run_amazon_competitor_analysis"},
+            }
+        ],
+        llm_call=fake_llm,
+    )
+
+    assert decision == {
+        "type": "assistant",
+        "message": "请提供有效的品牌和数量后再试。",
+        "slot_updates": {"platform": "amazon"},
+    }
+
+
+def test_decide_next_step_preserves_and_infers_assistant_slot_updates():
+    def fake_llm(_messages, _tools):
+        return {
+            "type": "assistant",
+            "message": "我先确认一下品牌和数量。",
+            "slot_updates": {"brand": "Blackview"},
+        }
+
+    decision = decide_next_step(
+        messages=[ChatMessage(role="user", content="看 Amazon 的 Blackview，5 个")],
+        slots=SessionSlots(),
+        tool_schemas=[
+            {
+                "type": "function",
+                "function": {"name": "run_amazon_competitor_analysis"},
+            }
+        ],
+        llm_call=fake_llm,
+    )
+
+    assert decision == {
+        "type": "assistant",
+        "message": "我先确认一下品牌和数量。",
+        "slot_updates": {"brand": "Blackview", "platform": "amazon", "count": 5},
+    }
 
 
 def test_decide_next_step_rejects_unsupported_tool_call():
