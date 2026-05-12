@@ -5,7 +5,17 @@
   const input = document.getElementById("message-input");
   const submitButton = document.getElementById("submit-button");
   const formStatus = document.getElementById("form-status");
+  const conversationPanel = document.getElementById("conversation-panel");
   const messageList = document.getElementById("message-list");
+  const processingIndicator = document.getElementById("processing-indicator");
+  const processingText = document.getElementById("processing-text");
+
+  const DEFAULT_PROCESSING_TEXT = "正在整理任务...";
+
+  const CSV_PREVIEW_COLUMNS = ["ASIN", "价格", "评分", "月销量估算值", "月销售额估算", "综合分析"];
+  const CSV_PREVIEW_ALIASES = {
+    ASIN: ["asin", "Asin"],
+  };
 
   let activeSource = null;
   let sessionId = null;
@@ -29,24 +39,14 @@
     }
 
     closeActiveSource();
+    hideProcessingIndicator();
     appendUserMessage(message);
     setSubmitting(true);
     updateFormState("正在发送消息...", true);
+    showProcessingIndicator("Agent 正在读取请求...");
 
     try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message }),
-      });
-
-      if (!response.ok) {
-        throw new Error("消息发送失败");
-      }
-
-      const payload = await response.json();
+      const payload = await postMessageWithSessionRecovery(message);
       if (!payload.session_id || !payload.run_id) {
         throw new Error("响应缺少会话或运行标识");
       }
@@ -60,13 +60,22 @@
         body: getErrorMessage(error),
         tone: "error",
       });
+      hideProcessingIndicator();
       updateFormState("消息发送失败。", false);
       setSubmitting(false);
     }
   });
 
   async function bootstrapSession() {
-    updateFormState("正在创建会话...", true);
+    return bootstrapSessionWithOptions();
+  }
+
+  async function bootstrapSessionWithOptions(options = {}) {
+    const silent = Boolean(options.silent);
+
+    if (!silent) {
+      updateFormState("正在创建会话...", true);
+    }
 
     try {
       const response = await fetch("/api/sessions", {
@@ -83,12 +92,45 @@
       }
 
       sessionId = payload.session_id;
-      submitButton.disabled = false;
-      updateFormState(`会话已创建：${sessionId}`, false);
+      if (!silent) {
+        submitButton.disabled = false;
+        updateFormState(`会话已创建：${sessionId}`, false);
+      }
+      return sessionId;
     } catch (error) {
-      submitButton.disabled = true;
-      updateFormState(getErrorMessage(error), false);
+      if (!silent) {
+        submitButton.disabled = true;
+        updateFormState(getErrorMessage(error), false);
+      }
+      throw error;
     }
+  }
+
+  async function postMessage(message) {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ message }),
+    });
+
+    return response;
+  }
+
+  async function postMessageWithSessionRecovery(message) {
+    let response = await postMessage(message);
+    if (response.status === 404) {
+      await bootstrapSessionWithOptions({ silent: true });
+      updateFormState("会话已过期，正在重建并重试...", true);
+      response = await postMessage(message);
+    }
+
+    if (!response.ok) {
+      throw new Error("消息发送失败");
+    }
+
+    return response.json();
   }
 
   function openStream(currentSessionId, runId) {
@@ -98,6 +140,10 @@
     activeSource = source;
 
     source.onmessage = (event) => {
+      if (activeSource !== source) {
+        return;
+      }
+
       const payload = parsePayload(event.data);
       if (!payload) {
         return;
@@ -115,13 +161,12 @@
         return;
       }
 
-      appendAssistantMessage({
-        title: "Stream Error",
-        body: "事件流已中断，请稍后重试。",
-        tone: "error",
-      });
-      finalizeStream(source);
-      updateFormState("事件流已中断，请稍后重试。", false);
+      if (source.readyState === EventSource.CLOSED) {
+        updateFormState("事件流连接已关闭，请刷新页面后重试。", true);
+        return;
+      }
+
+      updateFormState("事件流连接中断，正在尝试重连...", true);
     };
   }
 
@@ -129,6 +174,7 @@
     const type = payload.type;
 
     if (type === "assistant") {
+      hideProcessingIndicator();
       appendAssistantMessage({
         title: "Assistant",
         body: payload.message || "",
@@ -139,16 +185,13 @@
     }
 
     if (type === "tool_status") {
-      appendAssistantMessage({
-        title: "Status",
-        body: payload.message || "工具执行中。",
-        tone: "status",
-      });
+      showProcessingIndicator(payload.message || "工具执行中。");
       updateFormState(payload.message || "工具执行中。", true);
       return;
     }
 
     if (type === "artifact") {
+      hideProcessingIndicator();
       const resultMessage = appendAssistantMessage({
         title: "Artifact",
         body: payload.summary || "结果已生成。",
@@ -160,12 +203,14 @@
       }
 
       if (Array.isArray(payload.preview_columns) && Array.isArray(payload.preview_rows)) {
-        resultMessage.appendChild(buildPreviewTable(payload.preview_columns, payload.preview_rows));
+        const preview = normalizePreviewData(payload.preview_columns, payload.preview_rows);
+        resultMessage.appendChild(buildPreviewTable(preview.columns, preview.rows));
       }
       return;
     }
 
     if (type === "error") {
+      hideProcessingIndicator();
       appendAssistantMessage({
         title: "Error",
         body: payload.message || "任务执行失败。",
@@ -176,6 +221,7 @@
     }
 
     if (type === "done") {
+      hideProcessingIndicator();
       updateFormState("等待下一条消息。", false);
       return;
     }
@@ -228,9 +274,42 @@
     card.appendChild(bodyNode);
     item.appendChild(card);
     messageList.appendChild(item);
-
-    item.scrollIntoView({ behavior: "smooth", block: "end" });
+    scrollConversationToBottom();
     return card;
+  }
+
+  function scrollConversationToBottom() {
+    if (conversationPanel) {
+      conversationPanel.scrollTop = conversationPanel.scrollHeight;
+      return;
+    }
+
+    messageList.scrollTop = messageList.scrollHeight;
+  }
+
+  function showProcessingIndicator(message) {
+    if (!processingIndicator) {
+      return;
+    }
+
+    processingIndicator.hidden = false;
+    processingIndicator.dataset.state = "active";
+    if (processingText) {
+      processingText.textContent = message || DEFAULT_PROCESSING_TEXT;
+    }
+    scrollConversationToBottom();
+  }
+
+  function hideProcessingIndicator() {
+    if (!processingIndicator) {
+      return;
+    }
+
+    processingIndicator.hidden = true;
+    processingIndicator.dataset.state = "idle";
+    if (processingText) {
+      processingText.textContent = DEFAULT_PROCESSING_TEXT;
+    }
   }
 
   function buildDownloadLink(url, filename) {
@@ -275,8 +354,7 @@
     rows.forEach((row) => {
       const rowNode = document.createElement("tr");
       row.forEach((value) => {
-        const cell = document.createElement("td");
-        cell.textContent = value == null ? "" : String(value);
+        const cell = buildPreviewCell(value);
         rowNode.appendChild(cell);
       });
       tbody.appendChild(rowNode);
@@ -290,10 +368,54 @@
     return section;
   }
 
+  function buildPreviewCell(value) {
+    const cell = document.createElement("td");
+    const text = value == null ? "" : String(value);
+
+    if (!text) {
+      return cell;
+    }
+
+    const toggle = document.createElement("div");
+    toggle.className = "preview-cell-toggle";
+    toggle.dataset.expanded = "false";
+    toggle.textContent = text;
+    toggle.addEventListener("click", () => {
+      const isExpanded = toggle.dataset.expanded === "true";
+      toggle.dataset.expanded = isExpanded ? "false" : "true";
+    });
+
+    cell.appendChild(toggle);
+    return cell;
+  }
+
+  function normalizePreviewData(columns, rows) {
+    const incomingColumns = Array.isArray(columns) ? columns.map((c) => String(c)) : [];
+    const columnIndex = new Map(incomingColumns.map((c, i) => [c, i]));
+    const normalizedRows = Array.isArray(rows)
+      ? rows.map((row) => {
+          const values = Array.isArray(row) ? row : [];
+          return CSV_PREVIEW_COLUMNS.map((col) => {
+            const aliases = CSV_PREVIEW_ALIASES[col] || [];
+            for (const candidate of [col, ...aliases]) {
+              const idx = columnIndex.get(candidate);
+              if (idx != null && idx < values.length) {
+                const v = values[idx];
+                return v == null ? "" : String(v);
+              }
+            }
+            return "";
+          });
+        })
+      : [];
+    return { columns: CSV_PREVIEW_COLUMNS.slice(), rows: normalizedRows };
+  }
+
   function parsePayload(raw) {
     try {
       return JSON.parse(raw);
     } catch (_error) {
+      hideProcessingIndicator();
       appendAssistantMessage({
         title: "Parse Error",
         body: "收到无法解析的事件数据。",
@@ -308,6 +430,7 @@
       activeSource.close();
       activeSource = null;
     }
+    hideProcessingIndicator();
   }
 
   function finalizeStream(source) {
