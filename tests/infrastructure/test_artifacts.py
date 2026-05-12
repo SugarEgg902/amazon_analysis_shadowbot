@@ -1,7 +1,7 @@
 from datetime import datetime
 
-import artifacts
-from artifacts import ARTIFACTS_DIR, CSV_COLUMNS, write_analysis_csv
+import mp_agent.infrastructure.artifacts as artifacts
+from mp_agent.infrastructure.artifacts import ARTIFACTS_DIR, CSV_COLUMNS, write_analysis_csv
 
 
 def test_write_analysis_csv_uses_expected_header_order(tmp_path):
@@ -15,6 +15,11 @@ def test_write_analysis_csv_uses_expected_header_order(tmp_path):
                 "价格": "$199.99",
                 "评分": "4.4 out of 5 stars",
                 "评论数": "321",
+                "总类目": "Cell Phones & Accessories",
+                "Best Sellers Rank": "#3,214 in Cell Phones & Accessories",
+                "月销量区间": "200-800",
+                "月销量估算值": 500,
+                "月销售额估算": 99995.0,
                 "核心卖点": "三防机身",
                 "优点评炼": "续航长",
                 "缺点评炼": "偏厚重",
@@ -32,6 +37,11 @@ def test_write_analysis_csv_uses_expected_header_order(tmp_path):
 
     assert CSV_COLUMNS[0] == "品牌"
     assert CSV_COLUMNS[2] == "url"
+    assert "总类目" in CSV_COLUMNS
+    assert "Best Sellers Rank" in CSV_COLUMNS
+    assert "月销量区间" in CSV_COLUMNS
+    assert "月销量估算值" in CSV_COLUMNS
+    assert "月销售额估算" in CSV_COLUMNS
     assert lines[0] == ",".join(CSV_COLUMNS)
     assert "Blackview Example" in lines[1]
     assert "https://www.amazon.com/dp/B0TEST1234" in lines[1]
@@ -70,3 +80,8 @@ def test_write_analysis_csv_defaults_to_shared_artifacts_dir(tmp_path, monkeypat
 
     assert ARTIFACTS_DIR.is_absolute()
     assert path.parent == tmp_path
+
+
+def test_shared_artifacts_dir_defaults_outside_repo_tree():
+    assert ARTIFACTS_DIR.is_absolute()
+    assert artifacts.BASE_DIR not in ARTIFACTS_DIR.parents

@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import csv
+import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent
-ARTIFACTS_DIR = BASE_DIR / "artifacts"
+ARTIFACTS_DIR = Path(
+    os.getenv(
+        "MP_AGENT_ARTIFACTS_DIR",
+        Path(tempfile.gettempdir()) / "m_p_agent_artifacts",
+    )
+).resolve()
 
 
 CSV_COLUMNS = [
@@ -18,6 +25,11 @@ CSV_COLUMNS = [
     "价格",
     "评分",
     "评论数",
+    "总类目",
+    "Best Sellers Rank",
+    "月销量区间",
+    "月销量估算值",
+    "月销售额估算",
     "核心卖点",
     "优点评炼",
     "缺点评炼",

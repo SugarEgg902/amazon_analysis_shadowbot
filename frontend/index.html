@@ -4,39 +4,54 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>竞品分析</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/styles.css?v=20260511-chat-layout">
 </head>
 <body>
   <div class="page-shell">
-    <main class="workspace">
-      <section class="composer-panel">
-        <div class="panel-heading">
-          <h2>发起分析</h2>
-          <p>示例：从亚马逊获取 Blackview 5 个竞品分析</p>
-        </div>
+    <div class="workspace">
+      <header class="app-header">
+        <h2 class="app-title">多平台竞品分析</h2>
+        <p class="app-subtitle">示例：帮我看一下 Blackview 的竞品，然后补充 Amazon 和数量。</p>
+      </header>
 
+      <section id="conversation-panel" class="conversation-panel" aria-label="任务结果">
+        <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages"></ol>
+        <section
+          id="processing-indicator"
+          class="processing-indicator"
+          aria-live="polite"
+          aria-label="Agent processing"
+          hidden
+        >
+          <div class="processing-copy">
+            <p class="processing-title">Agent 正在处理</p>
+            <p id="processing-text" class="processing-text">正在整理任务...</p>
+          </div>
+          <div class="processing-dots" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+        </section>
+      </section>
+
+      <div class="composer-wrap">
         <form id="chat-form" class="composer" novalidate>
-          <label class="composer-label" for="message-input">任务内容</label>
-          <textarea
-            id="message-input"
-            name="message"
-            rows="4"
-            placeholder="从亚马逊获取 Blackview 5 个竞品分析"
-            required
-          >从亚马逊获取 Blackview 5 个竞品分析</textarea>
-          <div class="composer-actions">
-            <p id="form-status" class="form-status" aria-live="polite">等待新任务。</p>
-            <button id="submit-button" type="submit">开始分析</button>
+          <p id="form-status" class="form-status" aria-live="polite">正在创建会话...</p>
+          <div class="composer-row">
+            <label class="sr-only" for="message-input">对话内容</label>
+            <textarea
+              id="message-input"
+              name="message"
+              rows="2"
+              placeholder="帮我看一下 Blackview 的竞品"
+              required
+            ></textarea>
+            <button id="submit-button" type="submit">发送</button>
           </div>
         </form>
-      </section>
-
-      <section class="conversation-panel" aria-label="任务结果">
-        <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages"></ol>
-      </section>
-    </main>
+      </div>
+    </div>
   </div>
 
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v=20260511-chat-layout" defer></script>
 </body>
 </html>

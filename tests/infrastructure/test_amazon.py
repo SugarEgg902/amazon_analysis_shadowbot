@@ -14,24 +14,7 @@ sys.modules.setdefault(
     types.SimpleNamespace(Stealth=object),
 )
 
-import amazon_tools
-
-
-class _FakeResponse:
-    def __init__(self, payload, status_code=200, text=None, json_error=None):
-        self._payload = payload
-        self.status_code = status_code
-        self.text = text if text is not None else ""
-        self._json_error = json_error
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"http {self.status_code}")
-
-    def json(self):
-        if self._json_error is not None:
-            raise self._json_error
-        return self._payload
+from mp_agent.infrastructure import amazon as amazon_tools
 
 
 def test_write_single_cell_xlsx_round_trip(tmp_path):
@@ -41,6 +24,165 @@ def test_write_single_cell_xlsx_round_trip(tmp_path):
     rows = amazon_tools._read_xlsx_rows(str(path))
 
     assert rows == [["https://example.com/reviews"]]
+
+
+def test_parse_best_sellers_rank_extracts_primary_category_and_rank():
+    rank_text = "#3,214 in Cell Phones & Accessories (See Top 100 in Cell Phones & Accessories)"
+
+    result = amazon_tools._parse_best_sellers_rank(rank_text)
+
+    assert result == {
+        "bsr_rank": 3214,
+        "bsr_category": "Cell Phones & Accessories",
+        "bsr_display": "#3,214 in Cell Phones & Accessories",
+    }
+
+
+def test_parse_best_sellers_rank_prefers_supported_category_over_subcategory():
+    rank_text = (
+        "Amazon Best Sellers Rank "
+        "#8 in Unlocked Cell Phones (See Top 100 in Cell Phones & Accessories) "
+        "#287 in Cell Phones & Accessories"
+    )
+
+    result = amazon_tools._parse_best_sellers_rank(rank_text)
+
+    assert result == {
+        "bsr_rank": 287,
+        "bsr_category": "Cell Phones & Accessories",
+        "bsr_display": "#287 in Cell Phones & Accessories",
+    }
+
+
+def test_extract_best_sellers_rank_falls_back_to_body_text_when_sections_miss():
+    class _Locator:
+        def __init__(self, text="", count=1):
+            self._text = text
+            self._count = count
+            self.first = self
+
+        async def count(self):
+            return self._count
+
+        async def inner_text(self, timeout=0):
+            return self._text
+
+    class _Page:
+        def locator(self, selector):
+            if selector == "body":
+                return _Locator(
+                    "Product information Amazon Best Sellers Rank "
+                    "#1,234 in Electronics (See Top 100 in Electronics)"
+                )
+            return _Locator("", 0)
+
+    result = asyncio.run(amazon_tools._extract_best_sellers_rank(_Page()))
+
+    assert result == {
+        "bsr_rank": 1234,
+        "bsr_category": "Electronics",
+        "bsr_display": "#1,234 in Electronics",
+    }
+
+
+def test_extract_best_sellers_rank_reads_detail_bullet_spans():
+    class _Locator:
+        def __init__(self, texts=None, count=None):
+            self._texts = list(texts or [])
+            self._count = len(self._texts) if count is None else count
+            self.first = self
+
+        async def count(self):
+            return self._count
+
+        async def inner_text(self, timeout=0):
+            return self._texts[0] if self._texts else ""
+
+        async def all_inner_texts(self):
+            return list(self._texts)
+
+    class _Page:
+        def locator(self, selector):
+            if selector == "#detailBullets_feature_div span.a-list-item":
+                return _Locator(
+                    [
+                        "Brand Blackview",
+                        "Best Sellers Rank #2,345 in Electronics (See Top 100 in Electronics)",
+                    ]
+                )
+            if selector == "body":
+                return _Locator([""])
+            return _Locator([], 0)
+
+    result = asyncio.run(amazon_tools._extract_best_sellers_rank(_Page()))
+
+    assert result == {
+        "bsr_rank": 2345,
+        "bsr_category": "Electronics",
+        "bsr_display": "#2,345 in Electronics",
+    }
+
+
+def test_extract_best_sellers_rank_reads_expander_table_spans():
+    class _Locator:
+        def __init__(self, texts=None, count=None):
+            self._texts = list(texts or [])
+            self._count = len(self._texts) if count is None else count
+            self.first = self
+
+        async def count(self):
+            return self._count
+
+        async def inner_text(self, timeout=0):
+            return self._texts[0] if self._texts else ""
+
+        async def all_inner_texts(self):
+            return list(self._texts)
+
+    class _Page:
+        def locator(self, selector):
+            if selector == "#productDetails_expanderTables_depthRightSections span.a-list-item":
+                return _Locator(
+                    [
+                        "Item model number BV9300",
+                        "#12,345 in Cell Phones & Accessories (See Top 100 in Cell Phones & Accessories)",
+                    ]
+                )
+            if selector == "body":
+                return _Locator([""])
+            return _Locator([], 0)
+
+    result = asyncio.run(amazon_tools._extract_best_sellers_rank(_Page()))
+
+    assert result == {
+        "bsr_rank": 12345,
+        "bsr_category": "Cell Phones & Accessories",
+        "bsr_display": "#12,345 in Cell Phones & Accessories",
+    }
+
+
+def test_estimate_monthly_sales_uses_category_band_midpoint():
+    estimate = amazon_tools._estimate_monthly_sales(
+        "Electronics",
+        2500,
+    )
+
+    assert estimate == {
+        "monthly_sales_range": "200-1000",
+        "monthly_sales_estimate": 600,
+    }
+
+
+def test_estimate_monthly_sales_returns_none_for_unknown_category():
+    estimate = amazon_tools._estimate_monthly_sales(
+        "Home & Kitchen",
+        2500,
+    )
+
+    assert estimate == {
+        "monthly_sales_range": "",
+        "monthly_sales_estimate": "",
+    }
 
 
 def test_rows_to_review_dicts_maps_headerless_review_rows():
@@ -260,158 +402,3 @@ def test_summarize_reviews_serializes_fixed_excel_handshake(monkeypatch):
     ]
     assert first_result["asin"] == "ASIN-1"
     assert second_result["asin"] == "ASIN-2"
-
-
-def test_fetch_brightdata_reviews_handles_snapshot_flow(monkeypatch):
-    calls = []
-    sample_reviews = [
-        {
-            "asin": "B07TGQP8G1",
-            "rating": 5,
-            "review_id": "R1",
-            "review_header": "Great brush",
-            "review_text": "Battery life is strong and cleans well.",
-        }
-    ]
-
-    class FakeRequests:
-        @staticmethod
-        def post(url, headers=None, data=None, timeout=None):
-            calls.append(("POST", url))
-            return _FakeResponse(
-                {
-                    "snapshot_id": "s_test123",
-                    "message": "still processing",
-                },
-                status_code=202,
-            )
-
-        @staticmethod
-        def get(url, headers=None, params=None, timeout=None):
-            calls.append(("GET", url))
-            if url.endswith("/progress/s_test123"):
-                return _FakeResponse(
-                    {
-                        "snapshot_id": "s_test123",
-                        "dataset_id": "gd_le8e811kzy4ggddlq",
-                        "status": "ready",
-                    }
-                )
-            if url.endswith("/snapshot/s_test123"):
-                return _FakeResponse(sample_reviews)
-            raise AssertionError(f"unexpected GET url: {url}")
-
-    async def fake_sleep(_seconds):
-        return None
-
-    monkeypatch.setitem(sys.modules, "requests", FakeRequests)
-    monkeypatch.setattr(amazon_tools.asyncio, "sleep", fake_sleep)
-
-    result = asyncio.run(amazon_tools._fetch_brightdata_reviews("B07TGQP8G1", 100))
-
-    assert result == sample_reviews
-    assert calls == [
-        ("POST", "https://api.brightdata.com/datasets/v3/scrape?dataset_id=gd_le8e811kzy4ggddlq&notify=false&include_errors=true&format=json"),
-        ("GET", "https://api.brightdata.com/datasets/v3/progress/s_test123"),
-        ("GET", "https://api.brightdata.com/datasets/v3/snapshot/s_test123"),
-    ]
-
-
-def test_fetch_brightdata_reviews_retries_when_snapshot_download_is_still_building(monkeypatch):
-    calls = []
-    sample_reviews = [
-        {
-            "asin": "B07TGQP8G1",
-            "rating": 5,
-            "review_id": "R1",
-            "review_header": "Great brush",
-            "review_text": "Battery life is strong and cleans well.",
-        }
-    ]
-    snapshot_downloads = iter(
-        [
-            {
-                "status": "building",
-                "message": "Snapshot is building, try again in 10s",
-            },
-            sample_reviews,
-        ]
-    )
-
-    class FakeRequests:
-        @staticmethod
-        def post(url, headers=None, data=None, timeout=None):
-            calls.append(("POST", url))
-            return _FakeResponse({"snapshot_id": "s_test456"}, status_code=202)
-
-        @staticmethod
-        def get(url, headers=None, params=None, timeout=None):
-            calls.append(("GET", url))
-            if url.endswith("/progress/s_test456"):
-                return _FakeResponse(
-                    {
-                        "snapshot_id": "s_test456",
-                        "dataset_id": "gd_le8e811kzy4ggddlq",
-                        "status": "ready",
-                    }
-                )
-            if url.endswith("/snapshot/s_test456"):
-                return _FakeResponse(next(snapshot_downloads))
-            raise AssertionError(f"unexpected GET url: {url}")
-
-    sleep_calls = []
-
-    async def fake_sleep(seconds):
-        sleep_calls.append(seconds)
-        return None
-
-    monkeypatch.setitem(sys.modules, "requests", FakeRequests)
-    monkeypatch.setattr(amazon_tools.asyncio, "sleep", fake_sleep)
-
-    result = asyncio.run(amazon_tools._fetch_brightdata_reviews("B07TGQP8G1", 100))
-
-    assert result == sample_reviews
-    assert sleep_calls == [10.0]
-    assert calls == [
-        ("POST", "https://api.brightdata.com/datasets/v3/scrape?dataset_id=gd_le8e811kzy4ggddlq&notify=false&include_errors=true&format=json"),
-        ("GET", "https://api.brightdata.com/datasets/v3/progress/s_test456"),
-        ("GET", "https://api.brightdata.com/datasets/v3/snapshot/s_test456"),
-        ("GET", "https://api.brightdata.com/datasets/v3/snapshot/s_test456"),
-    ]
-
-
-def test_fetch_brightdata_reviews_parses_ndjson_from_sync_post(monkeypatch):
-    ndjson_text = (
-        '{"asin":"B07TGQP8G1","rating":5,"review_id":"R1","review_header":"Great","review_text":"Works well."}\n'
-        '{"asin":"B07TGQP8G1","rating":1,"review_id":"R2","review_header":"Bad","review_text":"Stopped working."}\n'
-    )
-
-    class FakeRequests:
-        @staticmethod
-        def post(url, headers=None, data=None, timeout=None):
-            return _FakeResponse(
-                None,
-                text=ndjson_text,
-                json_error=ValueError("Extra data"),
-            )
-
-    monkeypatch.setitem(sys.modules, "requests", FakeRequests)
-
-    result = asyncio.run(amazon_tools._fetch_brightdata_reviews("B07TGQP8G1", 100))
-
-    assert result == [
-        {
-            "asin": "B07TGQP8G1",
-            "rating": 5,
-            "review_id": "R1",
-            "review_header": "Great",
-            "review_text": "Works well.",
-        },
-        {
-            "asin": "B07TGQP8G1",
-            "rating": 1,
-            "review_id": "R2",
-            "review_header": "Bad",
-            "review_text": "Stopped working.",
-        },
-    ]

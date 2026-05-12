@@ -45,13 +45,6 @@ except ImportError:  # pragma: no cover - exercised by environments without play
 
 LLM_BASE_URL = "http://10.0.0.21:8000/v1"
 LLM_MODEL = "qwen3.6-35b-a3b-fp8"
-BRIGHTDATA_API_URL = "https://api.brightdata.com/datasets/v3/scrape"
-BRIGHTDATA_DATASET_ID = os.getenv("BRIGHTDATA_DATASET_ID", "gd_le8e811kzy4ggddlq")
-BRIGHTDATA_API_TOKEN = os.getenv("BRIGHTDATA_API_TOKEN", "30dd847b-8ca7-4343-ba55-3da5be719374")
-BRIGHTDATA_PROGRESS_URL = "https://api.brightdata.com/datasets/v3/progress"
-BRIGHTDATA_SNAPSHOT_URL = "https://api.brightdata.com/datasets/v3/snapshot"
-BRIGHTDATA_POLL_INTERVAL_SEC = 3.0
-BRIGHTDATA_POLL_TIMEOUT_SEC = 180.0
 ASIN_LIST_XLSX_PATH = "/Users/wei/Desktop/商品1/asin_list.xlsx"
 ALL_REVIEWS_XLSX_PATH = "/Users/wei/Desktop/商品1/result/all_reviews.xlsx"
 XLSX_POLL_INTERVAL_SEC = 3.0
@@ -85,6 +78,37 @@ REVIEW_HEADER_ALIASES = {
 }
 _EXCEL_REVIEW_LOCK = None
 _EXCEL_REVIEW_LOCK_LOOP = None
+_UNKNOWN_BSR_ESTIMATE = {
+    "monthly_sales_range": "",
+    "monthly_sales_estimate": "",
+}
+_BSR_RULES = {
+    "Cell Phones & Accessories": [
+        (500, "800-5000+", 2900),
+        (5000, "200-800", 500),
+        (50000, "30-200", 115),
+        (300000, "5-50", 28),
+        (float("inf"), "<10", 5),
+    ],
+    "Computers & Accessories": [
+        (1000, "500-3000+", 1750),
+        (10000, "100-500", 300),
+        (100000, "20-150", 85),
+        (float("inf"), "<20", 10),
+    ],
+    "Electronics": [
+        (500, "1000-6000+", 3500),
+        (5000, "200-1000", 600),
+        (50000, "30-250", 140),
+        (300000, "5-60", 33),
+        (float("inf"), "<10", 5),
+    ],
+}
+_BSR_CATEGORY_ALIASES = {
+    "cell phones & accessories": "Cell Phones & Accessories",
+    "computers & accessories": "Computers & Accessories",
+    "electronics": "Electronics",
+}
 
 
 def _require_playwright_scraping() -> None:
@@ -133,34 +157,6 @@ async def _new_page(playwright, headless: bool):
     return browser, context, page
 
 
-async def _is_amazon_review_page_blocked(page) -> str | None:
-    """返回 Amazon 拦截态名称；正常则返回 None。"""
-    try:
-        body_text = (await page.locator("body").inner_text(timeout=5000)).lower()
-    except Exception:
-        body_text = ""
-
-    url = page.url.lower()
-    try:
-        title = (await page.title()).lower()
-    except Exception:
-        title = ""
-
-    signals = [
-        ("/ap/signin" in url or "/signin" in url, "signin"),
-        ("captcha" in url, "captcha"),
-        ("enter the characters you see below" in body_text, "captcha"),
-        ("type the characters you see in this image" in body_text, "captcha"),
-        ("sorry, we just need to make sure you're not a robot" in body_text, "captcha"),
-        ("sorry! something went wrong!" in body_text, "error"),
-        ("dogs of amazon" in title or "dogs of amazon" in body_text, "error"),
-    ]
-    for matched, state in signals:
-        if matched:
-            return state
-    return None
-
-
 def _parse_review_star(text: str) -> float | None:
     try:
         token = (text or "").strip().split(" ")[0]
@@ -169,62 +165,153 @@ def _parse_review_star(text: str) -> float | None:
         return None
 
 
-async def _extract_review_cards(cards, max_items: int | None = None) -> list[dict]:
-    out: list[dict] = []
-    seen: set[tuple[str, str]] = set()
-    if max_items is not None:
-        cards = cards[:max_items]
+def _parse_best_sellers_rank(text: str) -> dict[str, Any]:
+    normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not normalized:
+        return {"bsr_rank": "", "bsr_category": "", "bsr_display": ""}
 
-    for card in cards:
+    if "Best Sellers Rank" in normalized:
+        normalized = normalized.split("Best Sellers Rank", 1)[1].strip()
+    normalized = normalized.lstrip(": ").strip()
+
+    matches = list(
+        re.finditer(r"#\s*([\d,]+)\s+in\s+(.+?)(?=\s+\(|\s+#|$)", normalized, flags=re.IGNORECASE)
+    )
+    if not matches:
+        return {"bsr_rank": "", "bsr_category": "", "bsr_display": ""}
+
+    candidates: list[tuple[str, int, str]] = []
+    for match in matches:
+        rank_token = match.group(1)
+        category = match.group(2).strip(" :-")
         try:
-            rating = ""
-            try:
-                rating = (
-                    await card.locator(
-                        "i[data-hook='review-star-rating'] span.a-icon-alt, "
-                        "i[data-hook='cmps-review-star-rating'] span.a-icon-alt, "
-                        "span.a-icon-alt"
-                    ).first.inner_text(timeout=2000)
-                ).strip()
-            except Exception:
-                pass
+            rank = int(rank_token.replace(",", ""))
+        except ValueError:
+            continue
+        candidates.append((rank_token, rank, category))
 
-            title = ""
-            try:
-                title = (
-                    await card.locator(
-                        "a[data-hook='review-title'], "
-                        "span[data-hook='review-title']"
-                    ).first.inner_text(timeout=2000)
-                ).strip()
-            except Exception:
-                pass
+    if not candidates:
+        return {"bsr_rank": "", "bsr_category": "", "bsr_display": ""}
 
-            body = ""
-            try:
-                body = (
-                    await card.locator(
-                        "span[data-hook='review-body'], "
-                        "div[data-hook='review-collapsed'] span, "
-                        "span.review-text-content"
-                    ).first.inner_text(timeout=4000)
-                ).strip()
-            except Exception:
-                pass
+    selected = None
+    for candidate in candidates:
+        if _canonical_bsr_category(candidate[2]):
+            selected = candidate
+            break
+    if selected is None:
+        selected = candidates[0]
 
-            if body and len(body) > 10:
-                key = (title[:120], body[:200])
-                if key in seen:
-                    continue
-                seen.add(key)
-                out.append({
-                    "rating": rating,
-                    "title": title,
-                    "text": body[:800],
-                })
+    rank_token, rank, category = selected
+
+    return {
+        "bsr_rank": rank,
+        "bsr_category": category,
+        "bsr_display": f"#{rank_token} in {category}",
+    }
+
+
+def _canonical_bsr_category(category: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", str(category or "")).strip().lower()
+    if not normalized:
+        return None
+
+    for alias, canonical in _BSR_CATEGORY_ALIASES.items():
+        if alias in normalized:
+            return canonical
+    return None
+
+
+def _estimate_monthly_sales(category: str, rank: int | str | None) -> dict[str, Any]:
+    canonical = _canonical_bsr_category(category)
+    if canonical is None:
+        return dict(_UNKNOWN_BSR_ESTIMATE)
+
+    try:
+        numeric_rank = int(rank)
+    except (TypeError, ValueError):
+        return dict(_UNKNOWN_BSR_ESTIMATE)
+
+    for max_rank, sales_range, estimate in _BSR_RULES[canonical]:
+        if numeric_rank <= max_rank:
+            return {
+                "monthly_sales_range": sales_range,
+                "monthly_sales_estimate": estimate,
+            }
+
+    return dict(_UNKNOWN_BSR_ESTIMATE)
+
+
+def _parse_price_amount(price_text: str | None) -> float | None:
+    match = re.search(r"(\d[\d,]*\.?\d*)", str(price_text or ""))
+    if not match:
+        return None
+
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _estimate_monthly_revenue(price_text: str | None, monthly_sales_estimate: Any) -> float | str:
+    try:
+        sales_value = float(monthly_sales_estimate)
+    except (TypeError, ValueError):
+        return ""
+
+    price_value = _parse_price_amount(price_text)
+    if price_value is None:
+        return ""
+
+    return round(price_value * sales_value, 2)
+
+
+async def _extract_best_sellers_rank(page) -> dict[str, Any]:
+    item_selectors = [
+        "#detailBullets_feature_div span.a-list-item",
+        "#detailBulletsWrapper_feature_div span.a-list-item",
+        "#glance_icons_div span.a-list-item",
+        "#productDetails_expanderTables_depthRightSections span.a-list-item",
+        "#productDetails_expanderTables_depthLeftSections span.a-list-item",
+    ]
+    for selector in item_selectors:
+        try:
+            locator = page.locator(selector)
+            if await locator.count() == 0:
+                continue
+            for text in await locator.all_inner_texts():
+                parsed = _parse_best_sellers_rank(text)
+                if parsed["bsr_rank"]:
+                    return parsed
         except Exception:
             continue
-    return out
+
+    selectors = [
+        "#productDetails_detailBullets_sections1",
+        "#detailBullets_feature_div",
+        "#detailBulletsWrapper_feature_div",
+        "#prodDetails",
+    ]
+    for selector in selectors:
+        try:
+            section = page.locator(selector).first
+            if await section.count() == 0:
+                continue
+            text = await section.inner_text(timeout=4000)
+            parsed = _parse_best_sellers_rank(text)
+            if parsed["bsr_rank"]:
+                return parsed
+        except Exception:
+            continue
+
+    try:
+        body_text = await page.locator("body").inner_text(timeout=5000)
+        parsed = _parse_best_sellers_rank(body_text)
+        if parsed["bsr_rank"]:
+            return parsed
+    except Exception:
+        pass
+
+    return {"bsr_rank": "", "bsr_category": "", "bsr_display": ""}
 
 
 def _build_review_url(asin: str) -> str:
@@ -461,7 +548,6 @@ async def _wait_for_reviews_xlsx(
         try:
             if os.path.exists(path):
                 rows = await asyncio.to_thread(_read_xlsx_rows, path)
-                print(f"当前评论总条数：{len(rows)}")
                 if _rows_have_data(rows):
                     return _rows_to_review_dicts(rows)
         except Exception as exc:
@@ -473,210 +559,6 @@ async def _wait_for_reviews_xlsx(
             raise TimeoutError(f"等待评论结果 Excel 超时: {path}")
 
         await asyncio.sleep(poll_interval_sec)
-
-
-def _coerce_brightdata_reviews(payload: Any) -> list[dict]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-
-    if isinstance(payload, dict):
-        for key in ("data", "items", "results", "reviews"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-
-        if payload.get("snapshot_id"):
-            raise RuntimeError(
-                "Bright Data 返回了 snapshot 元数据而不是评论列表，请确认当前接口是否为同步返回。"
-            )
-
-    if isinstance(payload, dict):
-        keys = ",".join(sorted(str(k) for k in payload.keys()))
-        status = payload.get("status")
-        message = payload.get("message")
-        raise RuntimeError(
-            f"无法解析 Bright Data 评论返回值: dict keys=[{keys}] status={status!r} message={message!r}"
-        )
-
-    raise RuntimeError(f"无法解析 Bright Data 评论返回值: {type(payload).__name__}")
-
-
-def _brightdata_retry_delay(payload: Any) -> float | None:
-    if not isinstance(payload, dict):
-        return None
-
-    status = str(payload.get("status") or "").strip().lower()
-    message = str(payload.get("message") or "").strip().lower()
-
-    should_retry = (
-        status in {"building", "running", "pending", "collecting", "digesting", "processing"}
-        or "try again" in message
-        or "not ready" in message
-        or "still building" in message
-    )
-    if not should_retry:
-        return None
-
-    match = re.search(r"try again in\s+(\d+(?:\.\d+)?)s", message)
-    if match:
-        return float(match.group(1))
-    return BRIGHTDATA_POLL_INTERVAL_SEC
-
-
-def _decode_brightdata_response(response) -> Any:
-    try:
-        return response.json()
-    except ValueError:
-        text = (getattr(response, "text", None) or "").strip()
-        if not text:
-            raise
-
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        rows = []
-        for line in text.splitlines():
-            stripped = line.strip()
-            if not stripped:
-                continue
-            rows.append(json.loads(stripped))
-
-        if not rows:
-            raise RuntimeError("Bright Data 返回了空响应文本")
-        if len(rows) == 1:
-            return rows[0]
-        return rows
-
-
-async def _fetch_brightdata_reviews(asin: str, max_reviews: int) -> list[dict]:
-    import requests
-
-    url = (
-        f"{BRIGHTDATA_API_URL}"
-        f"?dataset_id={BRIGHTDATA_DATASET_ID}&notify=false&include_errors=true&format=json"
-    )
-    headers = {
-        "Authorization": f"Bearer {BRIGHTDATA_API_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "input": [
-            {
-                "url": _build_review_url(asin),
-                "max_reviews": max_reviews,
-            }
-        ]
-    }
-
-    def _post() -> Any:
-        response = requests.post(
-            url,
-            headers=headers,
-            data=json.dumps(payload),
-            timeout=180,
-        )
-        response.raise_for_status()
-        return _decode_brightdata_response(response)
-
-    def _get_progress(snapshot_id: str) -> dict:
-        response = requests.get(
-            f"{BRIGHTDATA_PROGRESS_URL}/{snapshot_id}",
-            headers=headers,
-            timeout=60,
-        )
-        response.raise_for_status()
-        progress = _decode_brightdata_response(response)
-        if not isinstance(progress, dict):
-            raise RuntimeError(f"Bright Data progress 返回异常: {type(progress).__name__}")
-        return progress
-
-    def _download_snapshot(snapshot_id: str) -> Any:
-        response = requests.get(
-            f"{BRIGHTDATA_SNAPSHOT_URL}/{snapshot_id}",
-            headers=headers,
-            params={"format": "json"},
-            timeout=180,
-        )
-        response.raise_for_status()
-        return _decode_brightdata_response(response)
-
-    raw_payload = await asyncio.to_thread(_post)
-    if isinstance(raw_payload, dict) and raw_payload.get("snapshot_id"):
-        snapshot_id = str(raw_payload["snapshot_id"])
-        deadline = time.monotonic() + BRIGHTDATA_POLL_TIMEOUT_SEC
-
-        while True:
-            progress = await asyncio.to_thread(_get_progress, snapshot_id)
-            status = str(progress.get("status") or "").lower()
-            if status == "ready":
-                while True:
-                    raw_payload = await asyncio.to_thread(_download_snapshot, snapshot_id)
-                    retry_delay = _brightdata_retry_delay(raw_payload)
-                    if retry_delay is None:
-                        break
-                    if time.monotonic() >= deadline:
-                        raise RuntimeError(
-                            f"Bright Data snapshot {snapshot_id} 下载结果持续未就绪: {raw_payload}"
-                        )
-                    await asyncio.sleep(retry_delay)
-                break
-            if status == "failed":
-                raise RuntimeError(f"Bright Data snapshot {snapshot_id} 执行失败: {progress}")
-            if time.monotonic() >= deadline:
-                raise RuntimeError(f"等待 Bright Data snapshot {snapshot_id} 超时: {progress}")
-            await asyncio.sleep(BRIGHTDATA_POLL_INTERVAL_SEC)
-
-    reviews = _coerce_brightdata_reviews(raw_payload)
-    return [review for review in reviews if (review.get("asin") or asin) == asin]
-
-
-async def _scrape_detail_page_reviews(page, asin: str) -> tuple[list[dict], list[dict]]:
-    url = f"https://www.amazon.com/dp/{asin}"
-    print(f"[detail-reviews] {asin}")
-
-    positive: list[dict] = []
-    negative: list[dict] = []
-    try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        try:
-            await page.wait_for_load_state("networkidle", timeout=15000)
-        except Exception:
-            pass
-
-        blocked = await _is_amazon_review_page_blocked(page)
-        if blocked:
-            raise RuntimeError(f"amazon detail page blocked: {blocked}")
-
-        scroll_steps = [1200, 1200, 1200, 800, 800]
-        review_locator = page.locator(
-            "#cm-cr-dp-review-list div[data-hook='review'], "
-            "#cm-cr-review_list div[data-hook='review'], "
-            "div[data-hook='review']"
-        )
-        for offset in scroll_steps:
-            await page.evaluate(f"window.scrollBy(0, {offset})")
-            await _human_delay(1.5, 2.5)
-            if await review_locator.count() >= 3:
-                break
-
-        cards = await review_locator.all()
-        reviews = await _extract_review_cards(cards, max_items=12)
-        for review in reviews:
-            star = _parse_review_star(review.get("rating", ""))
-            if star is None:
-                continue
-            if star >= 4:
-                positive.append(review)
-            elif star <= 3:
-                negative.append(review)
-
-        print(f"[detail-reviews] got {len(positive)} pos / {len(negative)} neg")
-    except Exception as e:
-        print(f"[detail-reviews] failed: {e}")
-
-    return positive, negative
 
 
 # ============================================================================
@@ -728,6 +610,12 @@ async def _scrape_product_detail(page, asin: str, original: dict) -> dict:
         "price": None,
         "rating": None,
         "review_count": None,
+        "bsr_rank": "",
+        "bsr_category": "",
+        "bsr_display": "",
+        "monthly_sales_range": "",
+        "monthly_sales_estimate": "",
+        "monthly_revenue_estimate": "",
         "bullets": [],
         "is_valid": False,
         "invalid_reason": None,
@@ -814,6 +702,13 @@ async def _scrape_product_detail(page, asin: str, original: dict) -> dict:
         except Exception:
             pass
 
+        data.update(await _extract_best_sellers_rank(page))
+        data.update(_estimate_monthly_sales(data.get("bsr_category", ""), data.get("bsr_rank")))
+        data["monthly_revenue_estimate"] = _estimate_monthly_revenue(
+            data.get("price"),
+            data.get("monthly_sales_estimate"),
+        )
+
         # validity
         title = data.get("title") or ""
         lower = title.lower()
@@ -883,61 +778,6 @@ async def scrape_amazon_products(
 # ============================================================================
 # Tool B: Bright Data 评论 API + LLM 总结
 # ============================================================================
-
-async def _scrape_review_page(page, asin: str, filter_by: str, page_num: int) -> list[dict]:
-    """filter_by: 'positive' | 'critical'"""
-    url = (
-        f"https://www.amazon.com/product-reviews/{asin}/"
-        f"?reviewerType=all_reviews&sortBy=recent"
-        f"&filterByStar={filter_by}&pageNumber={page_num}"
-    )
-    print(f"[reviews] {asin} {filter_by} p={page_num}")
-    out: list[dict] = []
-    try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        try:
-            await page.wait_for_load_state("networkidle", timeout=15000)
-        except Exception:
-            pass
-
-        blocked = await _is_amazon_review_page_blocked(page)
-        if blocked:
-            raise RuntimeError(f"amazon review page blocked: {blocked}")
-
-        review_locator = page.locator(
-            "#cm_cr-review_list div[data-hook='review'], "
-            "div[data-hook='review'], "
-            "li[data-hook='review']"
-        )
-        await _human_delay(3, 5)
-        for _ in range(4):
-            await page.evaluate("window.scrollBy(0, 1200)")
-            await _human_delay(1.5, 2.5)
-            if await review_locator.count() > 0:
-                break
-
-        if await review_locator.count() == 0:
-            try:
-                await review_locator.first.wait_for(state="visible", timeout=12000)
-            except Exception:
-                pass
-
-        blocked = await _is_amazon_review_page_blocked(page)
-        if blocked:
-            raise RuntimeError(f"amazon review page blocked after load: {blocked}")
-
-        count = await review_locator.count()
-        if count == 0:
-            print(f"[reviews] no review cards found, url={page.url}")
-            return []
-
-        cards = await review_locator.all()
-        out = await _extract_review_cards(cards)
-        print(f"[reviews] got {len(out)} {filter_by} 条")
-    except Exception as e:
-        print(f"[reviews] failed: {e}")
-    return out
-
 
 def _normalize_review_for_summary(review: dict) -> dict:
     rating = review.get("rating", "")
@@ -1067,8 +907,7 @@ async def summarize_reviews(
             negative_reviews.append(review)
         else:
             neutral_reviews.append(review)
-        print(f"pos:{len(positive_reviews)}")
-        print(f"neg:{len(negative_reviews)}")
+
     positive_summary_reviews = [_normalize_review_for_summary(r) for r in positive_reviews]
     negative_summary_reviews = [_normalize_review_for_summary(r) for r in negative_reviews]
 
@@ -1105,7 +944,8 @@ TOOLS_SCHEMA: list[dict] = [
             "name": "scrape_amazon_products",
             "description": (
                 "在 Amazon.com 上搜索给定关键词，抓取商品搜索结果并访问详情页，"
-                "返回若干条有效商品（含 title, price, rating, review_count, bullets, asin 等）。"
+                "返回若干条有效商品（含 title, price, rating, review_count, bullets, asin, "
+                "Best Sellers Rank、类目、月销量估算、月销售额估算等）。"
                 "评论字段不在此工具中产出。需要评论摘要请再调用 summarize_reviews。"
             ),
             "parameters": {
