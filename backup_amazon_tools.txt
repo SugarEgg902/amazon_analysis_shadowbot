@@ -28,8 +28,15 @@ from typing import Any
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
 
-from playwright.async_api import async_playwright
-from playwright_stealth import Stealth
+try:
+    from playwright.async_api import async_playwright
+except ImportError:  # pragma: no cover - exercised by environments without Playwright
+    async_playwright = None
+
+try:
+    from playwright_stealth import Stealth
+except ImportError:  # pragma: no cover - exercised by environments without playwright-stealth
+    Stealth = None
 
 
 # ============================================================================
@@ -76,11 +83,31 @@ REVIEW_HEADER_ALIASES = {
     "badge": {"badge"},
     "url": {"url"},
 }
+_EXCEL_REVIEW_LOCK = None
+_EXCEL_REVIEW_LOCK_LOOP = None
+
+
+def _require_playwright_scraping() -> None:
+    if async_playwright is None or Stealth is None:
+        raise RuntimeError(
+            "Amazon scraping requires 'playwright' and 'playwright-stealth' to be installed."
+        )
 
 
 # ============================================================================
 # 共享辅助
 # ============================================================================
+
+
+def _get_excel_review_lock() -> asyncio.Lock:
+    global _EXCEL_REVIEW_LOCK, _EXCEL_REVIEW_LOCK_LOOP
+
+    loop = asyncio.get_running_loop()
+    if _EXCEL_REVIEW_LOCK is None or _EXCEL_REVIEW_LOCK_LOOP is not loop:
+        _EXCEL_REVIEW_LOCK = asyncio.Lock()
+        _EXCEL_REVIEW_LOCK_LOOP = loop
+    return _EXCEL_REVIEW_LOCK
+
 
 async def _human_delay(min_sec: float | None = None, max_sec: float | None = None) -> None:
     await asyncio.sleep(random.uniform(min_sec or MIN_DELAY, max_sec or MAX_DELAY))
@@ -434,6 +461,7 @@ async def _wait_for_reviews_xlsx(
         try:
             if os.path.exists(path):
                 rows = await asyncio.to_thread(_read_xlsx_rows, path)
+                print(f"当前评论总条数：{len(rows)}")
                 if _rows_have_data(rows):
                     return _rows_to_review_dicts(rows)
         except Exception as exc:
@@ -817,6 +845,8 @@ async def scrape_amazon_products(
     Returns:
         list of dict（与原 valid_products.json 结构一致）。
     """
+    _require_playwright_scraping()
+
     all_asins: list[dict] = []
     seen: set[str] = set()
     valid: list[dict] = []
@@ -962,7 +992,7 @@ def _llm_summarize(positive: list[dict], negative: list[dict]) -> dict:
 
     sys_prompt = (
         "你是一个电商商品评论分析助手。"
-        "你将收到若干条来自 Amazon 的英文好评和差评，"
+        "你将收到若干条来自 Amazon 的英文好评和差评(中评也归类到差评)，"
         "请用简体中文总结产品的优点和缺点。"
         "输出严格的 JSON，字段为 pros(string数组)、cons(string数组)、overall(一段中文总评)。"
         "每条 pros/cons 请精炼成 10-25 字短句，去重，按重要性排序。"
@@ -1002,15 +1032,19 @@ async def summarize_reviews(
     """覆盖写入 asin_list.xlsx，轮询 all_reviews.xlsx，并用本地 LLM 提炼好评/差评。"""
     del max_reviews  # Excel 结果文件由外部流程生成，这里保留参数仅兼容旧调用。
 
-    review_url = _build_review_url(asin)
-    await asyncio.to_thread(_write_single_cell_xlsx, ASIN_LIST_XLSX_PATH, review_url)
-    reviews = await _wait_for_reviews_xlsx(
-        ALL_REVIEWS_XLSX_PATH,
-        poll_interval_sec=XLSX_POLL_INTERVAL_SEC,
-        timeout_sec=XLSX_POLL_TIMEOUT_SEC,
-    )
-    await asyncio.to_thread(_write_single_cell_xlsx, ASIN_LIST_XLSX_PATH, "")
-    await asyncio.to_thread(_write_single_cell_xlsx, ALL_REVIEWS_XLSX_PATH, "")
+    async with _get_excel_review_lock():
+        review_url = _build_review_url(asin)
+        try:
+            await asyncio.to_thread(_write_single_cell_xlsx, ASIN_LIST_XLSX_PATH, review_url)
+            reviews = await _wait_for_reviews_xlsx(
+                ALL_REVIEWS_XLSX_PATH,
+                poll_interval_sec=XLSX_POLL_INTERVAL_SEC,
+                timeout_sec=XLSX_POLL_TIMEOUT_SEC,
+            )
+        finally:
+            await asyncio.to_thread(_write_single_cell_xlsx, ASIN_LIST_XLSX_PATH, "")
+            await asyncio.to_thread(_write_single_cell_xlsx, ALL_REVIEWS_XLSX_PATH, "")
+
     reviews = _dedupe_reviews(reviews)
 
     positive_reviews: list[dict] = []
@@ -1029,7 +1063,7 @@ async def summarize_reviews(
             neutral_reviews.append(review)
         elif star >= 4:
             positive_reviews.append(review)
-        elif star <= 2:
+        elif star <= 3:
             negative_reviews.append(review)
         else:
             neutral_reviews.append(review)
