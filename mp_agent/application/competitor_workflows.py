@@ -4,8 +4,9 @@ from pathlib import Path
 
 from mp_agent.domain.analysis import build_analysis_row
 from mp_agent.infrastructure.amazon import scrape_amazon_products, summarize_reviews
-from mp_agent.infrastructure.artifacts import CSV_COLUMNS, EBAY_CSV_COLUMNS, write_analysis_csv, write_ebay_analysis_csv
+from mp_agent.infrastructure.artifacts import CSV_COLUMNS, EBAY_CSV_COLUMNS, TEMU_CSV_COLUMNS, write_analysis_csv, write_ebay_analysis_csv, write_temu_analysis_csv
 from mp_agent.infrastructure.ebay import scrape_ebay_products, scrape_ebay_reviews
+from mp_agent.infrastructure.temu import scrape_temu_products, scrape_temu_reviews
 
 
 AMAZON_WORKFLOW_SCHEMA = {
@@ -184,4 +185,95 @@ async def run_ebay_competitor_analysis(
         "filename": csv_path.name,
         "download_url": download_url_builder(csv_path),
         "summary": f"已完成 {len(rows)} 个 eBay 竞品分析",
+    }
+
+
+TEMU_WORKFLOW_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "run_temu_competitor_analysis",
+        "description": "在 Temu 上抓取指定品牌商品、总结评论、生成竞品分析并导出 CSV。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "brand": {"type": "string"},
+                "count": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["brand", "count"],
+        },
+    },
+}
+
+
+async def run_temu_competitor_analysis(
+    brand: str,
+    count: int,
+    emit,
+    *,
+    scrape_products=scrape_temu_products,
+    scrape_reviews_fn=scrape_temu_reviews,
+    build_row_fn=build_analysis_row,
+    write_csv_fn=write_temu_analysis_csv,
+    download_url_builder=_default_download_url,
+) -> dict:
+    await emit(
+        {
+            "type": "tool_status",
+            "tool": "run_temu_competitor_analysis",
+            "message": "正在抓取 Temu 商品...",
+        }
+    )
+
+    products = await scrape_products(brand, max_valid=count)
+    if not products:
+        raise RuntimeError("没有抓取到有效商品")
+
+    rows: list[dict] = []
+    for product in products:
+        goods_id = product.get("goods_id", "")
+        product_url = product.get("url", "")
+        await emit(
+            {
+                "type": "tool_status",
+                "tool": "run_temu_competitor_analysis",
+                "message": f"正在分析 {goods_id} ...",
+            }
+        )
+        try:
+            review_summary = await scrape_reviews_fn(goods_id, product_url)
+        except Exception:
+            await emit(
+                {
+                    "type": "tool_status",
+                    "tool": "run_temu_competitor_analysis",
+                    "level": "warning",
+                    "message": f"{goods_id} 的评论总结失败，已使用空摘要继续。",
+                }
+            )
+            review_summary = {"pros": [], "cons": [], "overall": ""}
+
+        temu_product = {
+            **product,
+            "asin": goods_id,
+            "url": product_url,
+        }
+        rows.append(
+            build_row_fn(
+                brand=brand,
+                product=temu_product,
+                review_summary=review_summary,
+            )
+        )
+
+    csv_path = write_csv_fn(rows, brand=brand, count=count)
+    return {
+        "platform": "temu",
+        "brand": brand,
+        "count": count,
+        "rows": rows,
+        "preview_columns": TEMU_CSV_COLUMNS,
+        "preview_rows": [[row.get(column, "") for column in TEMU_CSV_COLUMNS] for row in rows],
+        "filename": csv_path.name,
+        "download_url": download_url_builder(csv_path),
+        "summary": f"已完成 {len(rows)} 个 Temu 竞品分析",
     }
