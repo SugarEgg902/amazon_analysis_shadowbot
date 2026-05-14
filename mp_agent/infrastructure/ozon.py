@@ -10,7 +10,7 @@ from typing import Any
 
 LLM_BASE_URL = "http://10.0.0.21:8000/v1"
 LLM_MODEL = "qwen3.6-35b-a3b-fp8"
-APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN", "apify_api_gVcg3a3TfXLLX1NSDSrBxGL67AAccx3qK1Su")
+APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN")
 APIFY_OZON_ACTOR = "APa5EQZZaXHWBmogv"
 # Approximate RUB→USD rate; update as needed
 RUB_TO_USD = 1 / 88.0
