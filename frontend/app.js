@@ -12,8 +12,19 @@
 
   const DEFAULT_PROCESSING_TEXT = "正在整理任务...";
 
+  const IDLE_STATUS_MESSAGES = [
+    "ᕦ(ò_óˇ)ᕤ  Agent 正在努力获取商品信息！",
+    "(╯°□°）╯  遭到了阻碍！",
+    "( •̀ ω •́ )✧  努力克服中...",
+    "(ง •_•)ง  正在与防守方搏斗",
+    "( ˘▽˘)っ♨  稍等，马上就好...",
+    "ヽ(•‿•)ノ  继续冲！",
+  ];
+
   let activeSource = null;
   let sessionId = null;
+  let statusCycleTimer = null;
+  let statusCycleIndex = 0;
 
   submitButton.disabled = true;
   bootstrapSession();
@@ -48,6 +59,7 @@
 
       sessionId = payload.session_id;
       input.value = "";
+      startStatusCycle();
       openStream(payload.session_id, payload.run_id);
     } catch (error) {
       appendAssistantMessage({
@@ -180,6 +192,7 @@
     }
 
     if (type === "tool_status") {
+      stopStatusCycle();
       showProcessingIndicator(payload.message || "工具执行中。");
       updateFormState(payload.message || "工具执行中。", true);
       return;
@@ -296,6 +309,7 @@
   }
 
   function hideProcessingIndicator() {
+    stopStatusCycle();
     if (!processingIndicator) {
       return;
     }
@@ -304,6 +318,23 @@
     processingIndicator.dataset.state = "idle";
     if (processingText) {
       processingText.textContent = DEFAULT_PROCESSING_TEXT;
+    }
+  }
+
+  function startStatusCycle() {
+    stopStatusCycle();
+    statusCycleIndex = 0;
+    showProcessingIndicator(IDLE_STATUS_MESSAGES[0]);
+    statusCycleTimer = setInterval(() => {
+      statusCycleIndex = (statusCycleIndex + 1) % IDLE_STATUS_MESSAGES.length;
+      showProcessingIndicator(IDLE_STATUS_MESSAGES[statusCycleIndex]);
+    }, 3500);
+  }
+
+  function stopStatusCycle() {
+    if (statusCycleTimer !== null) {
+      clearInterval(statusCycleTimer);
+      statusCycleTimer = null;
     }
   }
 

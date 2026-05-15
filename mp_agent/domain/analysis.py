@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 
-
-LLM_BASE_URL = "http://10.0.0.21:8005/v1"
-LLM_MODEL = "gemma-4-31b-it-fp8"
+from config.config import ANALYSIS_LLM_BASE_URL as LLM_BASE_URL, ANALYSIS_LLM_MODEL as LLM_MODEL
 
 
 def _stringify(value: object) -> str:

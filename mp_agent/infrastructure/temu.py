@@ -6,11 +6,10 @@ import os
 import re
 from datetime import datetime
 
-APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN", "apify_api_gVcg3a3TfXLLX1NSDSrBxGL67AAccx3qK1Su")
-APIFY_TEMU_ACTOR = "LTBzVVq592mKgR6lU"
 
-LLM_BASE_URL = "http://10.0.0.21:8000/v1"
-LLM_MODEL = "qwen3.6-35b-a3b-fp8"
+
+
+from config.config import APIFY_API_TOKEN, APIFY_TEMU_ACTOR, LLM_BASE_URL, LLM_MODEL
 
 _product_cache: dict[str, dict] = {}
 
@@ -104,6 +103,9 @@ def _map_apify_item(item: dict, keyword: str) -> dict:
     return product
 
 
+_MAX_APIFY_RETRIES = 3
+
+
 def _run_apify(keyword: str, max_results: int) -> list[dict]:
     from apify_client import ApifyClient
 
@@ -126,18 +128,30 @@ async def scrape_temu_products(
     max_valid: int = 5,
     headless: bool = False,
 ) -> list[dict]:
-    raw_items = await asyncio.to_thread(_run_apify, keyword, max(20, max_valid))
-
+    request_size = max(20, max_valid * 4)
+    seen_ids: set[str] = set()
     valid: list[dict] = []
-    for item in raw_items:
+
+    for attempt in range(_MAX_APIFY_RETRIES):
+        raw_items = await asyncio.to_thread(_run_apify, keyword, request_size)
+        for item in raw_items:
+            if len(valid) >= max_valid:
+                break
+            mapped = _map_apify_item(item, keyword)
+            gid = mapped["goods_id"]
+            if gid in seen_ids:
+                continue
+            seen_ids.add(gid)
+            if mapped["is_valid"]:
+                valid.append(mapped)
+                print(f"[temu] {gid} ✓ {mapped['title'][:50]}")
+            else:
+                print(f"[temu] {gid} ✗ 无效")
         if len(valid) >= max_valid:
             break
-        mapped = _map_apify_item(item, keyword)
-        if mapped["is_valid"]:
-            valid.append(mapped)
-            print(f"[temu] {mapped['goods_id']} ✓ {mapped['title'][:50]}")
-        else:
-            print(f"[temu] {mapped['goods_id']} ✗ 无效")
+        if attempt < _MAX_APIFY_RETRIES - 1:
+            request_size = min(request_size * 2, max_valid * 20)
+            print(f"[temu] 有效产品不足 {max_valid}，扩大请求量至 {request_size} 重试...")
 
     print(f"[temu] 共 {len(valid)} 个有效产品")
     return valid
