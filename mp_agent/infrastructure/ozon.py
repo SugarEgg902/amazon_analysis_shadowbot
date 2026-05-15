@@ -6,14 +6,14 @@ import os
 import re
 from datetime import datetime
 from typing import Any
+from config.config import APIFY_API_TOKEN, APIFY_OZON_ACTOR, LLM_BASE_URL, LLM_MODEL, RUB_TO_USD
 
 
-LLM_BASE_URL = "http://10.0.0.21:8000/v1"
-LLM_MODEL = "qwen3.6-35b-a3b-fp8"
-APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN")
-APIFY_OZON_ACTOR = "APa5EQZZaXHWBmogv"
-# Approximate RUB→USD rate; update as needed
-RUB_TO_USD = 1 / 88.0
+
+
+
+
+
 
 # Module-level cache: product_id -> raw review list, populated during scrape_ozon_products
 _reviews_cache: dict[str, list[dict]] = {}
@@ -146,6 +146,9 @@ def _map_apify_item(item: dict, keyword: str) -> dict:
     return data
 
 
+_MAX_APIFY_RETRIES = 3
+
+
 def _run_apify(keyword: str, max_results: int) -> list[dict]:
     from apify_client import ApifyClient
 
@@ -170,17 +173,29 @@ async def scrape_ozon_products(
 ) -> list[dict]:
     """Apify OZON actor -> 返回有效产品列表（价格已换算为美元）。"""
     print(f"[ozon] Apify 搜索: {keyword!r}, 目标有效 {max_valid}")
-    raw_items = await asyncio.to_thread(_run_apify, keyword, max_valid * 3)
-    print(f"[ozon] Apify 返回 {len(raw_items)} 条原始数据")
-
+    request_size = max_valid * 4
+    seen_ids: set[str] = set()
     valid: list[dict] = []
-    for item in raw_items:
+
+    for attempt in range(_MAX_APIFY_RETRIES):
+        raw_items = await asyncio.to_thread(_run_apify, keyword, request_size)
+        print(f"[ozon] Apify 返回 {len(raw_items)} 条原始数据 (attempt {attempt + 1})")
+        for item in raw_items:
+            if len(valid) >= max_valid:
+                break
+            mapped = _map_apify_item(item, keyword)
+            sku = mapped.get("product_id", "")
+            if sku in seen_ids:
+                continue
+            seen_ids.add(sku)
+            if mapped.get("is_valid"):
+                valid.append(mapped)
+                print(f"[ozon] 已拿到 {len(valid)}/{max_valid} 个有效产品")
         if len(valid) >= max_valid:
             break
-        mapped = _map_apify_item(item, keyword)
-        if mapped.get("is_valid"):
-            valid.append(mapped)
-            print(f"[ozon] 已拿到 {len(valid)}/{max_valid} 个有效产品")
+        if attempt < _MAX_APIFY_RETRIES - 1:
+            request_size = min(request_size * 2, max_valid * 20)
+            print(f"[ozon] 有效产品不足 {max_valid}，扩大请求量至 {request_size} 重试...")
 
     return valid
 

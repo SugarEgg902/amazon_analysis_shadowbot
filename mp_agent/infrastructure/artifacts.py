@@ -90,6 +90,42 @@ OTTO_CSV_COLUMNS = [
     "竞品定位",
 ]
 
+ALLEGRO_CSV_COLUMNS = EBAY_CSV_COLUMNS
+
+TIKTOKSHOP_CSV_COLUMNS = [
+    "搜索词",
+    "商品id",
+    "url",
+    "商品标题",
+    "价格",
+    "评分",
+    "评论数",
+    "卖家",
+    "月销量估算值",
+    "月销售额估算",
+    "核心卖点",
+    "优点评炼",
+    "缺点评炼",
+    "综合分析",
+    "竞品定位",
+]
+
+CDISCOUNT_CSV_COLUMNS = [
+    "搜索词",
+    "商品id",
+    "url",
+    "商品标题",
+    "价格",
+    "原价",
+    "卖家",
+    "总类目",
+    "核心卖点",
+    "优点评炼",
+    "缺点评炼",
+    "综合分析",
+    "竞品定位",
+]
+
 
 def _sanitize_brand(brand: str) -> str:
     sanitized = re.sub(r"[^a-z0-9]+", "_", brand.lower()).strip("_")
@@ -176,6 +212,69 @@ def write_otto_analysis_csv(rows: list[dict], brand: str, count: int, output_dir
         writer.writeheader()
         for row in rows:
             writer.writerow({key: row.get(key, "") for key in OTTO_CSV_COLUMNS})
+
+    return path
+
+
+def write_allegro_analysis_csv(rows: list[dict], brand: str, count: int, output_dir=None) -> Path:
+    output_dir = ARTIFACTS_DIR if output_dir is None else Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_brand = _sanitize_brand(brand)
+    path = output_dir / f"allegro_{safe_brand}_{count}_{timestamp}.csv"
+
+    suffix = 1
+    while path.exists():
+        path = output_dir / f"allegro_{safe_brand}_{count}_{timestamp}_{suffix}.csv"
+        suffix += 1
+
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=ALLEGRO_CSV_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in ALLEGRO_CSV_COLUMNS})
+
+    return path
+
+
+def write_tiktokshop_analysis_csv(rows: list[dict], brand: str, count: int, output_dir=None) -> Path:
+    output_dir = ARTIFACTS_DIR if output_dir is None else Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_brand = _sanitize_brand(brand)
+    path = output_dir / f"tiktokshop_{safe_brand}_{count}_{timestamp}.csv"
+
+    suffix = 1
+    while path.exists():
+        path = output_dir / f"tiktokshop_{safe_brand}_{count}_{timestamp}_{suffix}.csv"
+        suffix += 1
+
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=TIKTOKSHOP_CSV_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in TIKTOKSHOP_CSV_COLUMNS})
+
+    return path
+
+
+def write_cdiscount_analysis_csv(rows: list[dict], brand: str, count: int, output_dir=None) -> Path:
+    output_dir = ARTIFACTS_DIR if output_dir is None else Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_brand = _sanitize_brand(brand)
+    path = output_dir / f"cdiscount_{safe_brand}_{count}_{timestamp}.csv"
+
+    suffix = 1
+    while path.exists():
+        path = output_dir / f"cdiscount_{safe_brand}_{count}_{timestamp}_{suffix}.csv"
+        suffix += 1
+
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CDISCOUNT_CSV_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in CDISCOUNT_CSV_COLUMNS})
 
     return path
 

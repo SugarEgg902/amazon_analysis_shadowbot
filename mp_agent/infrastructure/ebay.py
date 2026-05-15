@@ -18,8 +18,7 @@ except ImportError:
     Stealth = None
 
 
-LLM_BASE_URL = "http://10.0.0.21:8000/v1"
-LLM_MODEL = "qwen3.6-35b-a3b-fp8"
+from config.config import LLM_BASE_URL, LLM_MODEL
 MIN_DELAY = 6.0
 MAX_DELAY = 14.0
 USER_AGENT = (
@@ -28,6 +27,7 @@ USER_AGENT = (
     "Chrome/134.0.0.0 Safari/537.36"
 )
 _EBAY_HOME = "https://www.ebay.com"
+_EBAY_MAX_AUTO_PAGES = 10
 
 
 def _require_playwright_scraping() -> None:
@@ -388,9 +388,24 @@ async def scrape_ebay_products(
 
             print(f"[ebay] 共 {len(all_items)} 个唯一 item ID, 目标有效 {max_valid}")
 
-            for original in all_items:
-                if len(valid) >= max_valid:
-                    break
+            next_search_page = max_pages + 1
+            idx = 0
+            while len(valid) < max_valid:
+                if idx >= len(all_items):
+                    if next_search_page > _EBAY_MAX_AUTO_PAGES:
+                        break
+                    print(f"[ebay] 有效产品不足 {max_valid}，继续抓第 {next_search_page} 页搜索结果...")
+                    new_items = await _scrape_search_page(page, keyword, next_search_page)
+                    next_search_page += 1
+                    for it in new_items:
+                        if it["item_id"] not in seen:
+                            seen.add(it["item_id"])
+                            all_items.append(it)
+                    await _human_delay()
+                    if idx >= len(all_items):
+                        break
+                original = all_items[idx]
+                idx += 1
                 detail = await _scrape_item_detail(page, original["item_id"], original)
                 if detail.get("is_valid"):
                     valid.append(detail)

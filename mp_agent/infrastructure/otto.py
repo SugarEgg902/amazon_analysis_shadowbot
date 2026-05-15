@@ -7,10 +7,7 @@ from datetime import datetime
 
 import httpx
 
-EUR_TO_USD = 1.08
-
-LLM_BASE_URL = "http://10.0.0.21:8000/v1"
-LLM_MODEL = "qwen3.6-35b-a3b-fp8"
+from config.config import EUR_TO_USD, LLM_BASE_URL, LLM_MODEL
 
 _HEADERS = {
     "User-Agent": (
@@ -23,6 +20,7 @@ _HEADERS = {
 }
 
 _product_cache: dict[str, dict] = {}
+_OTTO_MAX_AUTO_PAGES = 10
 
 
 def _estimate_total_sales(review_count: int, price_usd: float | None, title: str) -> tuple[str, str]:
@@ -203,8 +201,10 @@ async def scrape_otto_products(
     headless: bool = False,
 ) -> list[dict]:
     valid: list[dict] = []
+    effective_max_pages = max_pages
     async with httpx.AsyncClient(headers=_HEADERS, follow_redirects=True, timeout=20) as client:
-        for page in range(1, max_pages + 1):
+        page = 1
+        while page <= effective_max_pages:
             if len(valid) >= max_valid:
                 break
             url = f"https://www.otto.de/suche/{keyword}/"
@@ -217,6 +217,7 @@ async def scrape_otto_products(
                 print(f"[otto search] page {page}: {len(products)} products")
             except Exception as e:
                 print(f"[otto search] page {page} error: {e}")
+                page += 1
                 continue
 
             for p in products:
@@ -229,6 +230,11 @@ async def scrape_otto_products(
                 valid.append(p)
                 _product_cache[p["variation_id"]] = p
                 print(f"[otto] {p['variation_id']} ✓ {p['title'][:50]}")
+
+            if page == effective_max_pages and len(valid) < max_valid and effective_max_pages < _OTTO_MAX_AUTO_PAGES:
+                effective_max_pages += 1
+                print(f"[otto] 有效产品不足 {max_valid}，继续抓第 {effective_max_pages} 页...")
+            page += 1
 
     print(f"[otto] 共 {len(valid)} 个有效产品")
     return valid

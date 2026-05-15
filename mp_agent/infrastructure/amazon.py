@@ -43,15 +43,18 @@ except ImportError:  # pragma: no cover - exercised by environments without play
 # 配置
 # ============================================================================
 
-LLM_BASE_URL = "http://10.0.0.21:8000/v1"
-LLM_MODEL = "qwen3.6-35b-a3b-fp8"
-ASIN_LIST_XLSX_PATH = "/Users/wei/Desktop/商品1/asin_list.xlsx"
-ALL_REVIEWS_XLSX_PATH = "/Users/wei/Desktop/商品1/result/all_reviews.xlsx"
-XLSX_POLL_INTERVAL_SEC = 3.0
-XLSX_POLL_TIMEOUT_SEC = 300.0
+from config.config import (
+    LLM_BASE_URL,
+    LLM_MODEL,
+    ASIN_LIST_XLSX_PATH,
+    ALL_REVIEWS_XLSX_PATH,
+    XLSX_POLL_INTERVAL_SEC,
+    XLSX_POLL_TIMEOUT_SEC,
+)
 
 MIN_DELAY = 8.0
 MAX_DELAY = 18.0
+_MAX_AUTO_PAGES = 10
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -749,14 +752,23 @@ async def scrape_amazon_products(
     async with Stealth().use_async(async_playwright()) as pw:
         browser, _ctx, page = await _new_page(pw, headless)
         try:
-            # 1) 搜索
-            for pn in range(1, max_pages + 1):
+            # 1) 搜索：ASIN 不足 max_valid 时自动增页，最多到 _MAX_AUTO_PAGES
+            effective_max_pages = max_pages
+            pn = 1
+            while pn <= effective_max_pages:
                 items = await _scrape_search_page(page, keyword, pn)
                 for it in items:
                     if it["asin"] not in seen:
                         seen.add(it["asin"])
                         all_asins.append(it)
                 await _human_delay()
+                if (
+                    pn == effective_max_pages
+                    and len(all_asins) < max_valid
+                    and effective_max_pages < _MAX_AUTO_PAGES
+                ):
+                    effective_max_pages += 1
+                pn += 1
 
             print(f"[search] 共 {len(all_asins)} 个唯一 ASIN, 目标有效 {max_valid}")
 

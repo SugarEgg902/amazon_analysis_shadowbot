@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 import os
 import re
+from config.config import DASHSCOPE_API_KEY,DASHSCOPE_BASE_URL
 
-
-DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+DASHSCOPE_BASE_URL = DASHSCOPE_BASE_URL
 DASHSCOPE_MODEL = "glm-4.6"
 
 
 def build_primary_agent_client():
-    api_key = os.getenv("DASHSCOPE_API_KEY","sk-95a4c7552cc640aeb5f89890ffe4ad1d")
+    api_key = DASHSCOPE_API_KEY
     if not api_key:
         raise RuntimeError("DASHSCOPE_API_KEY is not set")
     from openai import OpenAI
@@ -65,6 +65,17 @@ def _normalize_slot_value(key: str, value):
             "otto": "otto",
             "otto.de": "otto",
             "奥托": "otto",
+            "allegro": "allegro",
+            "allegro.pl": "allegro",
+            "波兰": "allegro",
+            "tiktokshop": "tiktokshop",
+            "tiktok": "tiktokshop",
+            "tiktok shop": "tiktokshop",
+            "tiktokshop.com": "tiktokshop",
+            "抖音小店": "tiktokshop",
+            "cdiscount": "cdiscount",
+            "cdiscount.com": "cdiscount",
+            "法国": "cdiscount",
         }
         return platform_aliases.get(compact, compact)
     if key == "brand":
@@ -215,6 +226,30 @@ def _is_complete_otto_slot_state(slot_state: dict) -> bool:
     )
 
 
+def _is_complete_allegro_slot_state(slot_state: dict) -> bool:
+    return (
+        _clean_text(slot_state.get("platform")) == "allegro"
+        and _clean_text(slot_state.get("brand")) is not None
+        and _normalize_count(slot_state.get("count")) is not None
+    )
+
+
+def _is_complete_tiktokshop_slot_state(slot_state: dict) -> bool:
+    return (
+        _clean_text(slot_state.get("platform")) == "tiktokshop"
+        and _clean_text(slot_state.get("brand")) is not None
+        and _normalize_count(slot_state.get("count")) is not None
+    )
+
+
+def _is_complete_cdiscount_slot_state(slot_state: dict) -> bool:
+    return (
+        _clean_text(slot_state.get("platform")) == "cdiscount"
+        and _clean_text(slot_state.get("brand")) is not None
+        and _normalize_count(slot_state.get("count")) is not None
+    )
+
+
 def _is_complete_amazon_slot_state(slot_state: dict) -> bool:
     return (
         _clean_text(slot_state.get("platform")) == "amazon"
@@ -307,6 +342,42 @@ def _default_llm_call(messages: list[dict], tools: list[dict]) -> dict:
             "slot_updates": merged_slot_updates,
         }
 
+    if _is_complete_allegro_slot_state(merged_slot_updates):
+        return {
+            "type": "tool_call",
+            "tool_name": "run_allegro_competitor_analysis",
+            "arguments": {
+                "brand": _clean_text(merged_slot_updates.get("brand")),
+                "count": _normalize_count(merged_slot_updates.get("count")),
+            },
+            "assistant_message": "",
+            "slot_updates": merged_slot_updates,
+        }
+
+    if _is_complete_tiktokshop_slot_state(merged_slot_updates):
+        return {
+            "type": "tool_call",
+            "tool_name": "run_tiktokshop_competitor_analysis",
+            "arguments": {
+                "brand": _clean_text(merged_slot_updates.get("brand")),
+                "count": _normalize_count(merged_slot_updates.get("count")),
+            },
+            "assistant_message": "",
+            "slot_updates": merged_slot_updates,
+        }
+
+    if _is_complete_cdiscount_slot_state(merged_slot_updates):
+        return {
+            "type": "tool_call",
+            "tool_name": "run_cdiscount_competitor_analysis",
+            "arguments": {
+                "brand": _clean_text(merged_slot_updates.get("brand")),
+                "count": _normalize_count(merged_slot_updates.get("count")),
+            },
+            "assistant_message": "",
+            "slot_updates": merged_slot_updates,
+        }
+
     return {
         "type": "assistant",
         "message": parsed_decision.get("message") or _build_missing_slot_message(merged_slot_updates),
@@ -319,11 +390,11 @@ def _build_missing_slot_message(slot_state: dict) -> str:
     brand = _clean_text(slot_state.get("brand"))
     count = _normalize_count(slot_state.get("count"))
 
-    supported = {"amazon", "ebay", "temu", "ozon", "otto"}
+    supported = {"amazon", "ebay", "temu", "ozon", "otto", "allegro", "tiktokshop", "cdiscount"}
     if platform not in (None, *supported):
-        return "目前只支持 Amazon、eBay、Temu、OZON、OTTO 竞品分析，请改用其中一个平台。"
+        return "目前只支持 Amazon、eBay、Temu、OZON、OTTO、Allegro、TikTok Shop、Cdiscount 竞品分析，请改用其中一个平台。"
     if platform is None:
-        return "你想分析哪个平台？目前我支持 Amazon、eBay、Temu、OZON 和 OTTO。"
+        return "你想分析哪个平台？目前我支持 Amazon、eBay、Temu、OZON、OTTO、Allegro、TikTok Shop 和 Cdiscount。"
     if brand is None and count is None:
         return "请提供有效的品牌和数量后再试。"
     if brand is None:
@@ -388,7 +459,7 @@ def decide_next_step(messages, slots, tool_schemas, llm_call=None) -> dict:
         if decision.get("tool_name") not in supported_names:
             return {
                 "type": "assistant",
-                "message": "目前只支持 Amazon、eBay、Temu、OZON 竞品分析，请改用其中一个平台。",
+                "message": "目前只支持 Amazon、eBay、Temu、OZON、OTTO、Allegro、TikTok Shop、Cdiscount 竞品分析，请改用其中一个平台。",
                 "slot_updates": _merge_slot_updates(messages, slots, decision.get("slot_updates", {})),
             }
         if decision.get("tool_name") == "run_amazon_competitor_analysis":
