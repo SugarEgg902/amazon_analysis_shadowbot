@@ -2,3 +2,11 @@ fastapi
 uvicorn
 openai
 pytest
+sqlalchemy[asyncio]>=2.0
+alembic
+asyncmy
+cryptography
+jieba
+scikit-learn
+pymysql
+pytest-asyncio
