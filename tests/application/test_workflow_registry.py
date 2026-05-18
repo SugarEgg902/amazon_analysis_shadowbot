@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 import mp_agent.application.workflow_registry as workflow_registry
 from mp_agent.application.competitor_workflows import run_amazon_competitor_analysis
@@ -106,18 +107,24 @@ def test_run_amazon_competitor_analysis_emits_status_and_returns_artifact(tmp_pa
     def fake_row_builder(**_kwargs):
         return row
 
-    result = asyncio.run(
-        run_amazon_competitor_analysis(
-            brand="Blackview",
-            count=1,
-            emit=fake_emit,
-            scrape_products=fake_scrape,
-            summarize_reviews_fn=fake_reviews,
-            build_row_fn=fake_row_builder,
-            write_csv_fn=lambda rows, brand, count: tmp_path / "out.csv",
-            download_url_builder=lambda path: f"/api/download/{path.name}",
+    with patch("mp_agent.application.competitor_workflows.product_exists", new_callable=AsyncMock, return_value=False), \
+         patch("mp_agent.application.competitor_workflows.upsert_product", new_callable=AsyncMock, return_value=1), \
+         patch("mp_agent.application.competitor_workflows.save_detail", new_callable=AsyncMock), \
+         patch("mp_agent.application.competitor_workflows.save_snapshot", new_callable=AsyncMock), \
+         patch("mp_agent.application.competitor_workflows.save_analysis_result", new_callable=AsyncMock), \
+         patch("mp_agent.application.competitor_workflows.schedule_matching"):
+        result = asyncio.run(
+            run_amazon_competitor_analysis(
+                brand="Blackview",
+                count=1,
+                emit=fake_emit,
+                scrape_products=fake_scrape,
+                summarize_reviews_fn=fake_reviews,
+                build_row_fn=fake_row_builder,
+                write_csv_fn=lambda rows, brand, count: tmp_path / "out.csv",
+                download_url_builder=lambda path: f"/api/download/{path.name}",
+            )
         )
-    )
 
     assert events[0] == {
         "type": "tool_status",
@@ -151,18 +158,24 @@ def test_run_amazon_competitor_analysis_emits_warning_when_review_summary_fails(
         captured["review_summary"] = kwargs["review_summary"]
         return row
 
-    result = asyncio.run(
-        run_amazon_competitor_analysis(
-            brand="Blackview",
-            count=1,
-            emit=fake_emit,
-            scrape_products=fake_scrape,
-            summarize_reviews_fn=fake_reviews,
-            build_row_fn=fake_row_builder,
-            write_csv_fn=lambda rows, brand, count: tmp_path / "out.csv",
-            download_url_builder=lambda path: f"/api/download/{path.name}",
+    with patch("mp_agent.application.competitor_workflows.product_exists", new_callable=AsyncMock, return_value=False), \
+         patch("mp_agent.application.competitor_workflows.upsert_product", new_callable=AsyncMock, return_value=1), \
+         patch("mp_agent.application.competitor_workflows.save_detail", new_callable=AsyncMock), \
+         patch("mp_agent.application.competitor_workflows.save_snapshot", new_callable=AsyncMock), \
+         patch("mp_agent.application.competitor_workflows.save_analysis_result", new_callable=AsyncMock), \
+         patch("mp_agent.application.competitor_workflows.schedule_matching"):
+        result = asyncio.run(
+            run_amazon_competitor_analysis(
+                brand="Blackview",
+                count=1,
+                emit=fake_emit,
+                scrape_products=fake_scrape,
+                summarize_reviews_fn=fake_reviews,
+                build_row_fn=fake_row_builder,
+                write_csv_fn=lambda rows, brand, count: tmp_path / "out.csv",
+                download_url_builder=lambda path: f"/api/download/{path.name}",
+            )
         )
-    )
 
     assert captured["review_summary"] == {"pros": [], "cons": [], "overall": ""}
     assert events[1] == {
