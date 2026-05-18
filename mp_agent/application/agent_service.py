@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from mp_agent.application.primary_agent import decide_next_step, summarize_workflow_result
 from mp_agent.application.session_store import SessionStore
 from mp_agent.application.workflow_registry import build_default_registry
+from mp_agent.dao.repository import create_crawl_task, update_crawl_task
 
 
 SESSION_STORE = SessionStore()
@@ -160,11 +161,33 @@ async def run_session_message(
                 session_store.append_message(session_id, "assistant", decision["assistant_message"])
                 await emit_event(queue, {"type": "assistant", "message": decision["assistant_message"]})
 
-            result = await workflow_registry.call_tool(
-                decision["tool_name"],
-                decision["arguments"],
-                lambda payload: emit_event(queue, payload),
-            )
+            _platform = decision["arguments"].get("platform", decision["tool_name"].replace("run_", "").replace("_competitor_analysis", ""))
+            _keyword = decision["arguments"].get("brand", "")
+            _count = decision["arguments"].get("count", 5)
+            _task_id: int | None = None
+            try:
+                _task_id = await create_crawl_task(_platform, _keyword, _count)
+            except Exception:
+                pass  # DB unavailable — continue without task tracking
+
+            try:
+                result = await workflow_registry.call_tool(
+                    decision["tool_name"],
+                    decision["arguments"],
+                    lambda payload: emit_event(queue, payload),
+                )
+                if _task_id is not None:
+                    try:
+                        await update_crawl_task(_task_id, "done", products_found=result.get("count", _count))
+                    except Exception:
+                        pass
+            except Exception:
+                if _task_id is not None:
+                    try:
+                        await update_crawl_task(_task_id, "failed", error_message="workflow error")
+                    except Exception:
+                        pass
+                raise
             artifact_event = build_artifact_event(result)
             await emit_event(queue, artifact_event)
 

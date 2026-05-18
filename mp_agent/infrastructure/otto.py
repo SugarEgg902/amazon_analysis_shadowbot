@@ -19,7 +19,6 @@ _HEADERS = {
     "Accept-Encoding": "gzip, deflate, br",
 }
 
-_product_cache: dict[str, dict] = {}
 _OTTO_MAX_AUTO_PAGES = 10
 
 
@@ -228,7 +227,6 @@ async def scrape_otto_products(
                 detail = await _fetch_detail(p["url"])
                 p.update(detail)
                 valid.append(p)
-                _product_cache[p["variation_id"]] = p
                 print(f"[otto] {p['variation_id']} ✓ {p['title'][:50]}")
 
             if page == effective_max_pages and len(valid) < max_valid and effective_max_pages < _OTTO_MAX_AUTO_PAGES:
@@ -319,14 +317,10 @@ def _llm_summarize(positive: list[str], negative: list[str], product: dict) -> d
 
 
 async def scrape_otto_reviews(variation_id: str, product_url: str, max_reviews: int = 60) -> dict:
-    product = _product_cache.get(variation_id, {})
-
     review_id = _extract_review_id(product_url)
     if not review_id:
-        print(f"[otto reviews] no review_id from {product_url}, falling back to LLM")
-        if not product:
-            return {"pros": [], "cons": [], "overall": ""}
-        return await asyncio.to_thread(_llm_analyze_product, product)
+        print(f"[otto reviews] no review_id from {product_url}, returning empty")
+        return {"pros": [], "cons": [], "overall": ""}
 
     all_reviews: list[dict] = []
     pages_needed = max(1, (max_reviews + 29) // 30)
@@ -351,13 +345,11 @@ async def scrape_otto_reviews(variation_id: str, product_url: str, max_reviews: 
                 break
 
     if not all_reviews:
-        print(f"[otto reviews] no reviews scraped, falling back to LLM analysis")
-        if not product:
-            return {"pros": [], "cons": [], "overall": ""}
-        return await asyncio.to_thread(_llm_analyze_product, product)
+        print(f"[otto reviews] no reviews scraped, returning empty")
+        return {"pros": [], "cons": [], "overall": ""}
 
     positive = [r["text"] for r in all_reviews if r["rating"] >= 4]
     negative = [r["text"] for r in all_reviews if r["rating"] <= 3]
     print(f"[otto reviews] {len(positive)} positive, {len(negative)} negative")
-    return await asyncio.to_thread(_llm_summarize, positive, negative, product or {})
+    return await asyncio.to_thread(_llm_summarize, positive, negative, {})
 

@@ -14,7 +14,6 @@ from config.config import APIFY_API_TOKEN_2 as APIFY_API_TOKEN, APIFY_TIKTOKSHOP
 
 
 
-_product_cache: dict[str, dict] = {}
 _MAX_APIFY_RETRIES = 3
 
 
@@ -121,7 +120,6 @@ async def scrape_tiktokshop_products(
                 continue
             seen_ids.add(pid)
             if mapped["is_valid"]:
-                _product_cache[pid] = mapped
                 valid.append(mapped)
                 print(f"[tiktokshop] {pid} ✓ {mapped['title'][:50]}")
             else:
@@ -224,8 +222,6 @@ async def scrape_tiktokshop_reviews(
     product_url: str,
     max_reviews: int = 60,
 ) -> dict:
-    product = _product_cache.get(product_id, {})
-
     try:
         raw_reviews = await asyncio.to_thread(_run_apify_reviews, product_url, max_reviews)
     except Exception as e:
@@ -233,13 +229,11 @@ async def scrape_tiktokshop_reviews(
         raw_reviews = []
 
     if not raw_reviews:
-        if product:
-            return await asyncio.to_thread(_llm_analyze_product, product)
         return {"pros": [], "cons": [], "overall": ""}
 
     positive = [r for r in raw_reviews if (r.get("rating") or 0) >= 4]
     negative = [r for r in raw_reviews if (r.get("rating") or 0) <= 3]
     print(f"[tiktokshop reviews] {len(positive)} pos / {len(negative)} neg")
-    return await asyncio.to_thread(_llm_summarize, positive, negative, product)
+    return await asyncio.to_thread(_llm_summarize, positive, negative, {})
 
 

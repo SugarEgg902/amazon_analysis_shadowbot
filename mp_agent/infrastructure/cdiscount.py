@@ -17,7 +17,6 @@ from config.config import APIFY_API_TOKEN_2 as APIFY_API_TOKEN, APIFY_CDISCOUNT_
 
 
 
-_product_cache: dict[str, dict] = {}
 _MAX_APIFY_RETRIES = 3
 
 
@@ -125,7 +124,6 @@ async def scrape_cdiscount_products(
                 continue
             seen_ids.add(pid)
             if mapped["is_valid"]:
-                _product_cache[pid] = mapped
                 valid.append(mapped)
                 print(f"[cdiscount] {pid} ✓ {mapped['title'][:50]}")
             else:
@@ -186,8 +184,6 @@ async def scrape_cdiscount_reviews(
     product_url: str,
     max_reviews: int = 60,
 ) -> dict:
-    product = _product_cache.get(product_id, {})
-    if not product:
-        return {"pros": [], "cons": [], "overall": ""}
-    print(f"[cdiscount llm] analyzing {product_id}...")
-    return await asyncio.to_thread(_llm_analyze_product, product)
+    # Cdiscount has no accessible review API; return empty — the workflow
+    # calls _llm_analyze_product separately to fill pros/cons/overall.
+    return {"pros": [], "cons": [], "overall": ""}
