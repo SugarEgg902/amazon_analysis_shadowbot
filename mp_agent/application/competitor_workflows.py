@@ -87,8 +87,8 @@ async def _try_serve_from_cache(
     except Exception:
         return None
 
-    if not rows:
-        return None  # Crawl time exists but no analysis rows — treat as Case C
+    if not rows or len(rows) < count:
+        return None  # 数据不足 count 条 — 触发重新爬取
 
     try:
         csv_path = await export_platform_csv_from_db(platform, brand, count)
