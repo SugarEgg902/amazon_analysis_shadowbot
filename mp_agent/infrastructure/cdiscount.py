@@ -184,4 +184,6 @@ async def scrape_cdiscount_reviews(
     product_url: str,
     max_reviews: int = 60,
 ) -> dict:
+    # Cdiscount has no accessible review API; return empty — the workflow
+    # calls _llm_analyze_product separately to fill pros/cons/overall.
     return {"pros": [], "cons": [], "overall": ""}

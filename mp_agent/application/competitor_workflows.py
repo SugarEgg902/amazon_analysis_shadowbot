@@ -20,7 +20,7 @@ from mp_agent.infrastructure.ozon import scrape_ozon_products, scrape_ozon_revie
 from mp_agent.infrastructure.otto import scrape_otto_products, scrape_otto_reviews
 from mp_agent.infrastructure.allegro import scrape_allegro_products, scrape_allegro_reviews
 from mp_agent.infrastructure.tiktokshop import scrape_tiktokshop_products, scrape_tiktokshop_reviews
-from mp_agent.infrastructure.cdiscount import scrape_cdiscount_products, scrape_cdiscount_reviews
+from mp_agent.infrastructure.cdiscount import scrape_cdiscount_products, scrape_cdiscount_reviews, _llm_analyze_product as _cdiscount_llm_analyze
 
 
 AMAZON_WORKFLOW_SCHEMA = {
@@ -233,8 +233,8 @@ async def run_amazon_competitor_analysis(
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
                 "currency": "USD",
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
                 "url": product.get("url"),
                 "crawl_time": _dt.utcnow(),
             })
@@ -251,8 +251,8 @@ async def run_amazon_competitor_analysis(
                 "title": product.get("title"),
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
             })
             await save_analysis_result(_product_db_id, None, row)
             schedule_matching(_product_db_id, product.get("title", ""))
@@ -376,8 +376,8 @@ async def run_ebay_competitor_analysis(
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
                 "currency": "USD",
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
                 "url": product.get("url"),
                 "crawl_time": _dt.utcnow(),
             })
@@ -391,8 +391,8 @@ async def run_ebay_competitor_analysis(
                 "title": product.get("title"),
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
             })
             await save_analysis_result(_product_db_id, None, row)
             schedule_matching(_product_db_id, product.get("title", ""))
@@ -513,8 +513,8 @@ async def run_temu_competitor_analysis(
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
                 "currency": "USD",
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
                 "url": product.get("url"),
                 "crawl_time": _dt.utcnow(),
             })
@@ -527,8 +527,8 @@ async def run_temu_competitor_analysis(
                 "title": product.get("title"),
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
             })
             await save_analysis_result(_product_db_id, None, row)
             schedule_matching(_product_db_id, product.get("title", ""))
@@ -649,8 +649,8 @@ async def run_ozon_competitor_analysis(
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
                 "currency": "USD",
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
                 "url": product.get("url"),
                 "crawl_time": _dt.utcnow(),
             })
@@ -665,8 +665,8 @@ async def run_ozon_competitor_analysis(
                 "title": product.get("title"),
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
             })
             await save_analysis_result(_product_db_id, None, row)
             schedule_matching(_product_db_id, product.get("title", ""))
@@ -768,8 +768,8 @@ async def run_otto_competitor_analysis(
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
                 "currency": "USD",
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
                 "url": product.get("url"),
                 "crawl_time": _dt.utcnow(),
             })
@@ -784,8 +784,8 @@ async def run_otto_competitor_analysis(
                 "title": product.get("title"),
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
             })
             await save_analysis_result(_product_db_id, None, row)
             schedule_matching(_product_db_id, product.get("title", ""))
@@ -888,8 +888,8 @@ async def run_allegro_competitor_analysis(
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
                 "currency": "USD",
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
                 "url": product.get("url"),
                 "crawl_time": _dt.utcnow(),
             })
@@ -904,8 +904,8 @@ async def run_allegro_competitor_analysis(
                 "title": product.get("title"),
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
             })
             await save_analysis_result(_product_db_id, None, row)
             schedule_matching(_product_db_id, product.get("title", ""))
@@ -1011,8 +1011,8 @@ async def run_tiktokshop_competitor_analysis(
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
                 "currency": "USD",
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
                 "url": product.get("url"),
                 "crawl_time": _dt.utcnow(),
             })
@@ -1024,8 +1024,8 @@ async def run_tiktokshop_competitor_analysis(
                 "title": product.get("title"),
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
             })
             await save_analysis_result(_product_db_id, None, row)
             schedule_matching(_product_db_id, product.get("title", ""))
@@ -1117,6 +1117,15 @@ async def run_cdiscount_competitor_analysis(
             review_summary = {"pros": [], "cons": [], "overall": ""}
 
         cd_product = {**product, "asin": product_id, "url": product_url}
+
+        # Cdiscount has no review API — use the product-level LLM analysis as review_summary
+        # so that 优点评炼/缺点评炼/综合分析 are populated in the output row.
+        if not review_summary.get("overall"):
+            try:
+                review_summary = await _asyncio.to_thread(_cdiscount_llm_analyze, cd_product)
+            except Exception:
+                pass
+
         row = build_row_fn(brand=brand, product=cd_product, review_summary=review_summary)
         row["原价"] = product.get("striked_price", "")
         row["卖家"] = product.get("seller", "")
@@ -1126,11 +1135,11 @@ async def run_cdiscount_competitor_analysis(
                 "platform_product_id": str(product_id),
                 "keyword": brand,
                 "title": product.get("title"),
-                "price_usd": _parse_price_usd(product.get("price", "")),
+                "price_usd": product.get("price_usd") or _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
-                "currency": "USD",
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "currency": "EUR",
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
                 "url": product.get("url"),
                 "crawl_time": _dt.utcnow(),
             })
@@ -1144,8 +1153,8 @@ async def run_cdiscount_competitor_analysis(
                 "title": product.get("title"),
                 "price_usd": _parse_price_usd(product.get("price", "")),
                 "price_original": str(product.get("price", "")),
-                "rating": product.get("rating"),
-                "review_count": product.get("review_count"),
+                "rating": product.get("rating") or None,
+                "review_count": product.get("review_count") or None,
             })
             await save_analysis_result(_product_db_id, None, row)
             schedule_matching(_product_db_id, product.get("title", ""))
