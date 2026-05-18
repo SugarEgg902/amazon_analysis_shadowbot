@@ -11,9 +11,6 @@ from datetime import datetime
 
 from config.config import APIFY_API_TOKEN, APIFY_TEMU_ACTOR, LLM_BASE_URL, LLM_MODEL
 
-_product_cache: dict[str, dict] = {}
-
-
 def _parse_price(val) -> float | None:
     if val is None:
         return None
@@ -96,9 +93,6 @@ def _map_apify_item(item: dict, keyword: str) -> dict:
         "is_valid": len(title) > 5 and price_float is not None,
         "crawl_time": datetime.now().isoformat(),
     }
-
-    if goods_id:
-        _product_cache[goods_id] = product
 
     return product
 
@@ -197,9 +191,5 @@ def _llm_analyze_product(product: dict) -> dict:
 
 
 async def scrape_temu_reviews(goods_id: str, product_url: str, max_reviews: int = 60) -> dict:
-    product = _product_cache.get(goods_id, {})
-    if not product:
-        return {"pros": [], "cons": [], "overall": ""}
-    print(f"[temu llm] analyzing {goods_id} based on title/price/rating/sales...")
-    return await asyncio.to_thread(_llm_analyze_product, product)
+    return {"pros": [], "cons": [], "overall": ""}
 
