@@ -51,9 +51,9 @@ class PlatformProduct(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    detail: Mapped["PlatformProductDetail | None"] = relationship(back_populates="product", uselist=False)
-    snapshots: Mapped[list["PlatformProductSnapshot"]] = relationship(back_populates="product")
-    analysis_results: Mapped[list["AnalysisResult"]] = relationship(back_populates="product")
+    detail: Mapped["PlatformProductDetail | None"] = relationship(back_populates="product", uselist=False, lazy="raise")
+    snapshots: Mapped[list["PlatformProductSnapshot"]] = relationship(back_populates="product", lazy="raise")
+    analysis_results: Mapped[list["AnalysisResult"]] = relationship(back_populates="product", lazy="raise")
 
     __table_args__ = (
         UniqueConstraint("platform", "platform_product_id", name="uq_platform_product"),
@@ -74,7 +74,7 @@ class PlatformProductDetail(Base):
     extra: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    product: Mapped["PlatformProduct"] = relationship(back_populates="detail")
+    product: Mapped["PlatformProduct"] = relationship(back_populates="detail", lazy="raise")
 
     __table_args__ = (UniqueConstraint("product_id", name="uq_product"),)
 
@@ -98,7 +98,7 @@ class PlatformProductSnapshot(Base):
     snapshotted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    product: Mapped["PlatformProduct"] = relationship(back_populates="snapshots")
+    product: Mapped["PlatformProduct"] = relationship(back_populates="snapshots", lazy="raise")
 
     __table_args__ = (
         Index("idx_product_id", "product_id"),
@@ -148,7 +148,7 @@ class AnalysisResult(Base):
     llm_model: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    product: Mapped["PlatformProduct"] = relationship(back_populates="analysis_results")
+    product: Mapped["PlatformProduct"] = relationship(back_populates="analysis_results", lazy="raise")
 
     __table_args__ = (
         Index("idx_product_id_ar", "product_id"),
