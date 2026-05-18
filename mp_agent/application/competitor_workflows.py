@@ -182,7 +182,7 @@ async def run_amazon_competitor_analysis(
         }
     )
 
-    products = await scrape_products(brand, max_valid=count * 2)
+    products = await scrape_products(brand, max_valid=count)
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
@@ -320,7 +320,7 @@ async def run_ebay_competitor_analysis(
         }
     )
 
-    products = await scrape_products(brand, max_valid=count * 2)
+    products = await scrape_products(brand, max_valid=count)
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
@@ -460,7 +460,7 @@ async def run_temu_competitor_analysis(
         }
     )
 
-    products = await scrape_products(brand, max_valid=count * 2)
+    products = await scrape_products(brand, max_valid=count)
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
@@ -601,7 +601,7 @@ async def run_ozon_competitor_analysis(
         }
     )
 
-    products = await scrape_products(brand, max_valid=count * 2)
+    products = await scrape_products(brand, max_valid=count)
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
@@ -733,7 +733,7 @@ async def run_otto_competitor_analysis(
 
     await emit({"type": "tool_status", "tool": "run_otto_competitor_analysis", "message": "正在抓取 OTTO 商品..."})
 
-    products = await scrape_products(brand, max_valid=count * 2)
+    products = await scrape_products(brand, max_valid=count)
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
@@ -858,7 +858,7 @@ async def run_allegro_competitor_analysis(
 
     await emit({"type": "tool_status", "tool": "run_allegro_competitor_analysis", "message": "正在抓取 Allegro 商品..."})
 
-    products = await scrape_products(brand, max_valid=count * 2)
+    products = await scrape_products(brand, max_valid=count)
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
@@ -984,7 +984,7 @@ async def run_tiktokshop_competitor_analysis(
 
     await emit({"type": "tool_status", "tool": "run_tiktokshop_competitor_analysis", "message": "正在抓取 TikTok Shop 商品..."})
 
-    products = await scrape_products(brand, max_valid=count * 2, region=region)
+    products = await scrape_products(brand, max_valid=count, region=region)
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
@@ -1107,7 +1107,7 @@ async def run_cdiscount_competitor_analysis(
 
     await emit({"type": "tool_status", "tool": "run_cdiscount_competitor_analysis", "message": "正在抓取 Cdiscount 商品..."})
 
-    products = await scrape_products(brand, max_valid=count * 2)
+    products = await scrape_products(brand, max_valid=count)
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
