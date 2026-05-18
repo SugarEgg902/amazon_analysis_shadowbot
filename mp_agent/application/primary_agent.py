@@ -270,6 +270,29 @@ def _is_complete_amazon_slot_state(slot_state: dict) -> bool:
     )
 
 
+_FORCE_REFRESH_KEYWORDS = [
+    "全新数据", "实时数据", "最新数据", "重新获取", "重新抓取", "重新爬取",
+    "强制刷新", "不要缓存", "忽略缓存", "绕过缓存", "刷新数据", "更新数据",
+    "新数据", "重抓", "重爬", "实时", "全新", "强制更新",
+]
+
+
+def _detect_force_refresh(messages: list[dict]) -> bool:
+    """Return True if the last user message contains a force-refresh keyword."""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            content = msg.get("content") or ""
+            if isinstance(content, list):
+                content = " ".join(
+                    c.get("text", "") for c in content if isinstance(c, dict)
+                )
+            for kw in _FORCE_REFRESH_KEYWORDS:
+                if kw in content:
+                    return True
+            return False
+    return False
+
+
 def _default_llm_call(messages: list[dict], tools: list[dict]) -> dict:
     client = build_primary_agent_client()
 
@@ -294,110 +317,139 @@ def _default_llm_call(messages: list[dict], tools: list[dict]) -> dict:
     merged_slot_updates = _extract_slot_state_from_system_prompt(messages)
     merged_slot_updates.update(_normalize_slot_updates(parsed_decision.get("slot_updates")))
 
+    force_refresh = _detect_force_refresh(messages)
+
     if _is_complete_amazon_slot_state(merged_slot_updates):
+        args = {
+            "brand": _clean_text(merged_slot_updates.get("brand")),
+            "count": _normalize_count(merged_slot_updates.get("count")),
+        }
+        if force_refresh:
+            args["_skip_cache"] = True
         return {
             "type": "tool_call",
             "tool_name": "run_amazon_competitor_analysis",
-            "arguments": {
-                "brand": _clean_text(merged_slot_updates.get("brand")),
-                "count": _normalize_count(merged_slot_updates.get("count")),
-            },
+            "arguments": args,
             "assistant_message": "",
             "slot_updates": merged_slot_updates,
         }
 
     if _is_complete_ebay_slot_state(merged_slot_updates):
+        args = {
+            "brand": _clean_text(merged_slot_updates.get("brand")),
+            "count": _normalize_count(merged_slot_updates.get("count")),
+        }
+        if force_refresh:
+            args["_skip_cache"] = True
         return {
             "type": "tool_call",
             "tool_name": "run_ebay_competitor_analysis",
-            "arguments": {
-                "brand": _clean_text(merged_slot_updates.get("brand")),
-                "count": _normalize_count(merged_slot_updates.get("count")),
-            },
+            "arguments": args,
             "assistant_message": "",
             "slot_updates": merged_slot_updates,
         }
 
     if _is_complete_temu_slot_state(merged_slot_updates):
+        args = {
+            "brand": _clean_text(merged_slot_updates.get("brand")),
+            "count": _normalize_count(merged_slot_updates.get("count")),
+        }
+        if force_refresh:
+            args["_skip_cache"] = True
         return {
             "type": "tool_call",
             "tool_name": "run_temu_competitor_analysis",
-            "arguments": {
-                "brand": _clean_text(merged_slot_updates.get("brand")),
-                "count": _normalize_count(merged_slot_updates.get("count")),
-            },
+            "arguments": args,
             "assistant_message": "",
             "slot_updates": merged_slot_updates,
         }
 
     if _is_complete_ozon_slot_state(merged_slot_updates):
+        args = {
+            "brand": _clean_text(merged_slot_updates.get("brand")),
+            "count": _normalize_count(merged_slot_updates.get("count")),
+        }
+        if force_refresh:
+            args["_skip_cache"] = True
         return {
             "type": "tool_call",
             "tool_name": "run_ozon_competitor_analysis",
-            "arguments": {
-                "brand": _clean_text(merged_slot_updates.get("brand")),
-                "count": _normalize_count(merged_slot_updates.get("count")),
-            },
+            "arguments": args,
             "assistant_message": "",
             "slot_updates": merged_slot_updates,
         }
 
     if _is_complete_otto_slot_state(merged_slot_updates):
+        args = {
+            "brand": _clean_text(merged_slot_updates.get("brand")),
+            "count": _normalize_count(merged_slot_updates.get("count")),
+        }
+        if force_refresh:
+            args["_skip_cache"] = True
         return {
             "type": "tool_call",
             "tool_name": "run_otto_competitor_analysis",
-            "arguments": {
-                "brand": _clean_text(merged_slot_updates.get("brand")),
-                "count": _normalize_count(merged_slot_updates.get("count")),
-            },
+            "arguments": args,
             "assistant_message": "",
             "slot_updates": merged_slot_updates,
         }
 
     if _is_complete_allegro_slot_state(merged_slot_updates):
+        args = {
+            "brand": _clean_text(merged_slot_updates.get("brand")),
+            "count": _normalize_count(merged_slot_updates.get("count")),
+        }
+        if force_refresh:
+            args["_skip_cache"] = True
         return {
             "type": "tool_call",
             "tool_name": "run_allegro_competitor_analysis",
-            "arguments": {
-                "brand": _clean_text(merged_slot_updates.get("brand")),
-                "count": _normalize_count(merged_slot_updates.get("count")),
-            },
+            "arguments": args,
             "assistant_message": "",
             "slot_updates": merged_slot_updates,
         }
 
     if _is_complete_tiktokshop_slot_state(merged_slot_updates):
+        args = {
+            "brand": _clean_text(merged_slot_updates.get("brand")),
+            "count": _normalize_count(merged_slot_updates.get("count")),
+        }
+        if force_refresh:
+            args["_skip_cache"] = True
         return {
             "type": "tool_call",
             "tool_name": "run_tiktokshop_competitor_analysis",
-            "arguments": {
-                "brand": _clean_text(merged_slot_updates.get("brand")),
-                "count": _normalize_count(merged_slot_updates.get("count")),
-            },
+            "arguments": args,
             "assistant_message": "",
             "slot_updates": merged_slot_updates,
         }
 
     if _is_complete_cdiscount_slot_state(merged_slot_updates):
+        args = {
+            "brand": _clean_text(merged_slot_updates.get("brand")),
+            "count": _normalize_count(merged_slot_updates.get("count")),
+        }
+        if force_refresh:
+            args["_skip_cache"] = True
         return {
             "type": "tool_call",
             "tool_name": "run_cdiscount_competitor_analysis",
-            "arguments": {
-                "brand": _clean_text(merged_slot_updates.get("brand")),
-                "count": _normalize_count(merged_slot_updates.get("count")),
-            },
+            "arguments": args,
             "assistant_message": "",
             "slot_updates": merged_slot_updates,
         }
 
     if _is_complete_aliexpress_slot_state(merged_slot_updates):
+        args = {
+            "brand": _clean_text(merged_slot_updates.get("brand")),
+            "count": _normalize_count(merged_slot_updates.get("count")),
+        }
+        if force_refresh:
+            args["_skip_cache"] = True
         return {
             "type": "tool_call",
             "tool_name": "run_aliexpress_competitor_analysis",
-            "arguments": {
-                "brand": _clean_text(merged_slot_updates.get("brand")),
-                "count": _normalize_count(merged_slot_updates.get("count")),
-            },
+            "arguments": args,
             "assistant_message": "",
             "slot_updates": merged_slot_updates,
         }
