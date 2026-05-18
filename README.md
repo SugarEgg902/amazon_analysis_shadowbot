@@ -1,27 +1,34 @@
-# M_P_Agent — 多平台竞品分析 Agent
+# M_P_Agent — 多平台电商竞品分析系统
 
-基于大语言模型的电商竞品分析工具，支持通过自然语言对话驱动，自动抓取多个电商平台的商品数据、买家评论，并输出结构化 CSV 报告。
+基于 LLM 的电商竞品分析 Agent，支持 9 大平台关键词搜索、商品数据采集、AI 评论摘要、CSV 导出，并将结果持久化到 MySQL 数据库供历史趋势分析。
+
+---
 
 ## 支持平台
 
-| 平台 | 地区 | 数据来源 | 货币 |
-|------|------|----------|------|
-| Amazon | 美国 | Playwright 爬虫 + XLSX | USD |
-| eBay | 美国 | Playwright 爬虫 | USD |
-| Temu | 美国 | Apify Actor | USD |
-| Ozon | 俄罗斯 | Apify Actor | RUB → USD |
-| Otto | 德国 | httpx 爬虫 | EUR → USD |
-| Allegro | 波兰 | Apify Actor | PLN → USD |
-| TikTok Shop | 美国 | Apify Actor | USD |
-| Cdiscount | 法国 | Apify Actor | EUR → USD |
+| 平台 | 地区 | 销量字段 |
+|------|------|----------|
+| Amazon | 全球 | 月销量估算、月销售额、BSR 排名 |
+| eBay | 全球 | 月销量估算、月销售额 |
+| Temu | 全球 | 月销量估算、月销售额 |
+| OZON | 俄罗斯 | 月销量估算、月销售额 |
+| OTTO | 德国 | 月销量估算、月销售额 |
+| Allegro | 波兰 | 月销量估算、月销售额 |
+| TikTok Shop | 东南亚/美国 | 月销量估算、月销售额 |
+| Cdiscount | 法国 | 月销量估算、月销售额 |
+| AliExpress | 全球 | 累计销量、累计销售额、折扣率 |
 
-## 功能
+---
 
-- 自然语言对话：输入"帮我分析 doogee 在 temu 上的竞品，5个"即可启动分析
-- 自动补足数量：当单次抓取/API 调用结果不足时，自动扩页或重试直到满足目标数量
-- 评论 LLM 总结：提取买家好评/差评，用本地 LLM 生成中文优缺点摘要
-- CSV 导出：每次分析结果保存为带时间戳的 CSV 文件
-- SSE 实时进度：前端通过 Server-Sent Events 实时展示抓取进度
+## 技术栈
+
+- **后端**：FastAPI + Python 3.10+
+- **LLM**：GLM-4.6（DashScope）
+- **数据库**：MySQL 8 + SQLAlchemy 2.x (async) + Alembic
+- **爬虫**：Playwright + playwright-stealth（Amazon/eBay 等）、Apify Actor（AliExpress/Temu/Ozon 等）、httpx（Otto）
+- **前端**：静态 HTML/JS（`frontend/`）
+
+---
 
 ## 项目结构
 
@@ -33,18 +40,23 @@ mp_agent/
 │   ├── workflow_registry.py    # 工作流注册表
 │   └── agent_service.py        # 会话管理与运行调度
 ├── domain/
-│   └── analysis.py             # LLM 分析行构建（gemma 模型）
+│   └── analysis.py             # LLM 分析行构建
 ├── infrastructure/
 │   ├── amazon.py / ebay.py / temu.py / ozon.py
-│   ├── otto.py / allegro.py / tiktokshop.py / cdiscount.py
+│   ├── otto.py / allegro.py / tiktokshop.py / cdiscount.py / aliexpress.py
 │   └── artifacts.py            # CSV 写入
-└── presentation/
-    └── http.py                 # FastAPI + SSE 接口
+└── dao/
+    ├── models.py               # SQLAlchemy ORM 模型
+    ├── db.py                   # 数据库连接
+    └── repository.py           # 数据访问层
 
 frontend/                       # 单页前端（原生 JS）
 config/
-└── config.py                   # API 密钥、模型地址（已加入 .gitignore）
+└── config.py                   # API 密钥、数据库地址（已加入 .gitignore）
+alembic/                        # 数据库迁移脚本
 ```
+
+---
 
 ## 快速开始
 
@@ -52,69 +64,112 @@ config/
 
 ```bash
 pip install -r requirements.txt
-# eBay/Amazon Playwright 爬虫还需要：
-pip install playwright playwright-stealth
 playwright install chromium
 ```
 
 ### 2. 配置
 
-复制并填写配置文件（不会被提交到 git）：
-
-```bash
-cp config/config.example.py config/config.py
-```
-
-`config/config.py` 需要填写的字段：
+复制并填写 `config/config.py`：
 
 ```python
-# 本地 LLM（基础设施层，用于商品分析）
-LLM_BASE_URL = "http://<host>:8000/v1"
-LLM_MODEL = "qwen3.6-35b-a3b-fp8"
-
-# 本地 LLM（领域层，用于评论总结）
-ANALYSIS_LLM_BASE_URL = "http://<host>:8005/v1"
-ANALYSIS_LLM_MODEL = "gemma-4-31b-it-fp8"
-
-# Apify（temu / ozon / allegro）
-APIFY_API_TOKEN = "apify_api_..."
-
-# Apify（tiktokshop / cdiscount）
-APIFY_API_TOKEN_2 = "apify_api_..."
-
-# Amazon XLSX 路径（本地 Amazon 工具输出）
-ASIN_LIST_XLSX_PATH = "/path/to/asin_list.xlsx"
-ALL_REVIEWS_XLSX_PATH = "/path/to/all_reviews.xlsx"
+DASHSCOPE_API_KEY = "..."       # GLM-4.6 API Key
+DASHSCOPE_BASE_URL = "..."
+MYSQL_URL = "mysql+asyncmy://user:pass@host/dbname"
+APIFY_API_TOKEN = "..."
+APIFY_ALIEXPRESS_ACTOR = "bkYbOC0TL11Z6lmBl"
 ```
 
-### 3. 启动服务
+### 3. 初始化数据库
 
 ```bash
-uvicorn app:app --reload --port 8080
+alembic upgrade head
 ```
 
-浏览器打开 `http://localhost:8080`，在对话框中输入分析请求即可。
+### 4. 启动服务
 
-## 使用示例
-
-```
-帮我看一下 doogee 在 temu 的竞品，5个
-分析 blackview 在 amazon 上的竞品，10个
-查一下 headphones 在 ebay 上的竞品，8个
+```bash
+uvicorn app:app --reload
 ```
 
-Agent 会自动识别平台和数量，完成后在 `artifacts/` 目录生成 CSV 文件。
+访问 `http://localhost:8000` 打开前端界面。
+
+---
+
+## 使用方式
+
+在对话框中输入自然语言，例如：
+
+```
+帮我分析一下 doogee 在 Amazon 上的竞品，要 10 个
+查一下 blackview 在 eBay 的竞品 5 个
+分析速卖通上 ulefone 的竞品，5 个
+```
+
+支持强制刷新（绕过缓存）：
+
+```
+帮我重新获取 doogee 在 Amazon 的最新数据，10 个
+给我实时的 blackview eBay 竞品数据
+```
+
+---
+
+## 数据库结构
+
+```
+platform_product          # 商品主表（最新状态，upsert）
+platform_product_detail   # 平台扩展字段（BSR、卖点、折扣率等）
+platform_product_snapshot # 历史快照（每次爬取追加，用于趋势分析）
+analysis_result           # LLM 分析结果（优缺点、竞品定位）
+crawl_task                # 爬取任务记录
+global_product            # 跨平台商品去重（语义匹配）
+review                    # 买家评论
+```
+
+### 趋势分析查询示例
+
+```sql
+-- 某商品价格走势
+SELECT snapshotted_at, price_usd
+FROM platform_product_snapshot
+WHERE platform_product_id = 'B0XXXXX'
+ORDER BY snapshotted_at;
+
+-- 某关键词下所有商品的月销量变化
+SELECT s.snapshotted_at, p.title, s.extra->>'$.monthly_sales_estimate' AS sales
+FROM platform_product_snapshot s
+JOIN platform_product p ON p.id = s.product_id
+WHERE p.keyword = 'doogee' AND p.platform = 'amazon'
+ORDER BY s.snapshotted_at, p.id;
+```
+
+每隔 3 天爬取一次，一个月可积累约 10 个批次，可分析：价格涨降节奏、销量趋势、评分变化、竞品进出情况。
+
+---
+
+## 输出文件
+
+每次分析完成后在 `artifacts/` 目录生成 CSV，文件名格式：
+
+```
+amazon_{brand}_{count}_{timestamp}.csv
+ebay_{brand}_{count}_{timestamp}.csv
+aliexpress_{brand}_{count}_{timestamp}.csv
+...
+```
+
+---
+
+## 缓存策略
+
+- 默认缓存有效期：3 天（同平台 + 关键词 + 数量）
+- 用户输入含"实时"、"全新数据"、"重新获取"等关键词时自动绕过缓存
+- 重新爬取后若数据日期与数据库相同，执行 UPDATE 而非 INSERT（避免重复）
+
+---
 
 ## 运行测试
 
 ```bash
 pytest tests/
 ```
-
-## 依赖说明
-
-- **FastAPI + uvicorn**：HTTP 服务与 SSE 流
-- **openai**：调用本地 LLM（兼容 OpenAI API 格式）
-- **apify-client**：调用 Apify Actor（Temu / Ozon / Allegro / TikTok Shop / Cdiscount）
-- **playwright + playwright-stealth**：Amazon / eBay 反爬虫浏览器自动化
-- **httpx**：Otto 轻量 HTTP 爬虫

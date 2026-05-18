@@ -123,21 +123,39 @@ async def update_crawl_task(
 
 
 async def save_analysis_result(product_id: int, crawl_task_id: int | None, row: dict) -> None:
-    """Persist an LLM analysis result for a product."""
+    """Upsert an LLM analysis result for a product (one record per product_id)."""
     async with get_async_session() as session:
         pros_val = row.get("优点评炼", "")
         cons_val = row.get("缺点评炼", "")
-        ar = AnalysisResult(
-            product_id=product_id,
-            crawl_task_id=crawl_task_id,
-            core_selling_points=row.get("核心卖点"),
-            pros=pros_val if isinstance(pros_val, list) else [pros_val] if pros_val else [],
-            cons=cons_val if isinstance(cons_val, list) else [cons_val] if cons_val else [],
-            overall=row.get("综合分析"),
-            positioning=row.get("竞品定位"),
-            category=row.get("总类目"),
+        pros = pros_val if isinstance(pros_val, list) else [pros_val] if pros_val else []
+        cons = cons_val if isinstance(cons_val, list) else [cons_val] if cons_val else []
+
+        existing = await session.execute(
+            select(AnalysisResult).where(AnalysisResult.product_id == product_id)
         )
-        session.add(ar)
+        ar = existing.scalar_one_or_none()
+
+        if ar is not None:
+            ar.core_selling_points = row.get("核心卖点")
+            ar.pros = pros
+            ar.cons = cons
+            ar.overall = row.get("综合分析")
+            ar.positioning = row.get("竞品定位")
+            ar.category = row.get("总类目")
+            if crawl_task_id is not None:
+                ar.crawl_task_id = crawl_task_id
+        else:
+            ar = AnalysisResult(
+                product_id=product_id,
+                crawl_task_id=crawl_task_id,
+                core_selling_points=row.get("核心卖点"),
+                pros=pros,
+                cons=cons,
+                overall=row.get("综合分析"),
+                positioning=row.get("竞品定位"),
+                category=row.get("总类目"),
+            )
+            session.add(ar)
 
 
 async def get_latest_crawl_time(platform: str, keyword: str) -> datetime | None:
