@@ -680,8 +680,8 @@ async def run_ozon_competitor_analysis(
             })
             await save_detail(_product_db_id, {
                 "sku": product.get("sku"),
-                "total_sales_estimate": product.get("total_sales_estimate"),
-                "total_revenue_estimate": product.get("total_revenue_estimate"),
+                "total_sales_estimate": product.get("总销量估算"),
+                "total_revenue_estimate": product.get("总销售额估算"),
                 "breadcrumbs": product.get("breadcrumbs"),
                 "short_characteristics": product.get("short_characteristics"),
             })
@@ -808,8 +808,8 @@ async def run_otto_competitor_analysis(
             })
             await save_detail(_product_db_id, {
                 "variation_id": product.get("variation_id"),
-                "total_sales_estimate": product.get("total_sales_estimate"),
-                "total_revenue_estimate": product.get("total_revenue_estimate"),
+                "total_sales_estimate": product.get("总销量估算"),
+                "total_revenue_estimate": product.get("总销售额估算"),
                 "description": product.get("description"),
                 "bullets": product.get("bullets"),
             })
