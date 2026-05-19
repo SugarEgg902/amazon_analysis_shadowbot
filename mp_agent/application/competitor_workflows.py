@@ -8,7 +8,7 @@ from pathlib import Path
 from config.config import CACHE_TTL_DAYS
 from mp_agent.domain.analysis import build_analysis_row
 from mp_agent.dao.repository import (
-    upsert_product, save_detail, save_snapshot, save_analysis_result, product_exists,
+    upsert_product, save_detail, save_snapshot, save_analysis_result,
     get_latest_crawl_time, has_running_crawl_task,
 )
 from mp_agent.dao.matching import schedule_matching
@@ -188,19 +188,7 @@ async def run_amazon_competitor_analysis(
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
-    if _skip_cache:
-        new_products = products[:count]
-    else:
-        seen_new = []
-        for _p in products:
-            _pid = str(_p.get("asin", ""))
-            if _pid and not await product_exists("amazon", _pid):
-                seen_new.append(_p)
-            if len(seen_new) >= count:
-                break
-        new_products = seen_new
-        if not new_products:
-            raise RuntimeError("所有搜索结果均已分析过，未找到新商品")
+    new_products = products[:count]
 
     rows: list[dict] = []
     for product in new_products:
@@ -331,19 +319,7 @@ async def run_ebay_competitor_analysis(
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
-    if _skip_cache:
-        new_products = products[:count]
-    else:
-        seen_new = []
-        for _p in products:
-            _pid = str(_p.get("item_id", ""))
-            if _pid and not await product_exists("ebay", _pid):
-                seen_new.append(_p)
-            if len(seen_new) >= count:
-                break
-        new_products = seen_new
-        if not new_products:
-            raise RuntimeError("所有搜索结果均已分析过，未找到新商品")
+    new_products = products[:count]
 
     rows: list[dict] = []
     for product in new_products:
@@ -477,19 +453,7 @@ async def run_temu_competitor_analysis(
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
-    if _skip_cache:
-        new_products = products[:count]
-    else:
-        seen_new = []
-        for _p in products:
-            _pid = str(_p.get("goods_id", ""))
-            if _pid and not await product_exists("temu", _pid):
-                seen_new.append(_p)
-            if len(seen_new) >= count:
-                break
-        new_products = seen_new
-        if not new_products:
-            raise RuntimeError("所有搜索结果均已分析过，未找到新商品")
+    new_products = products[:count]
 
     rows: list[dict] = []
     for product in new_products:
@@ -624,19 +588,7 @@ async def run_ozon_competitor_analysis(
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
-    if _skip_cache:
-        new_products = products[:count]
-    else:
-        seen_new = []
-        for _p in products:
-            _pid = str(_p.get("product_id", ""))
-            if _pid and not await product_exists("ozon", _pid):
-                seen_new.append(_p)
-            if len(seen_new) >= count:
-                break
-        new_products = seen_new
-        if not new_products:
-            raise RuntimeError("所有搜索结果均已分析过，未找到新商品")
+    new_products = products[:count]
 
     rows: list[dict] = []
     for product in new_products:
@@ -760,19 +712,7 @@ async def run_otto_competitor_analysis(
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
-    if _skip_cache:
-        new_products = products[:count]
-    else:
-        seen_new = []
-        for _p in products:
-            _pid = str(_p.get("variation_id", ""))
-            if _pid and not await product_exists("otto", _pid):
-                seen_new.append(_p)
-            if len(seen_new) >= count:
-                break
-        new_products = seen_new
-        if not new_products:
-            raise RuntimeError("所有搜索结果均已分析过，未找到新商品")
+    new_products = products[:count]
 
     rows: list[dict] = []
     for product in new_products:
@@ -889,19 +829,7 @@ async def run_allegro_competitor_analysis(
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
-    if _skip_cache:
-        new_products = products[:count]
-    else:
-        seen_new = []
-        for _p in products:
-            _pid = str(_p.get("product_id", ""))
-            if _pid and not await product_exists("allegro", _pid):
-                seen_new.append(_p)
-            if len(seen_new) >= count:
-                break
-        new_products = seen_new
-        if not new_products:
-            raise RuntimeError("所有搜索结果均已分析过，未找到新商品")
+    new_products = products[:count]
 
     rows: list[dict] = []
     for product in new_products:
@@ -1019,19 +947,7 @@ async def run_tiktokshop_competitor_analysis(
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
-    if _skip_cache:
-        new_products = products[:count]
-    else:
-        seen_new = []
-        for _p in products:
-            _pid = str(_p.get("product_id", ""))
-            if _pid and not await product_exists("tiktokshop", _pid):
-                seen_new.append(_p)
-            if len(seen_new) >= count:
-                break
-        new_products = seen_new
-        if not new_products:
-            raise RuntimeError("所有搜索结果均已分析过，未找到新商品")
+    new_products = products[:count]
 
     rows: list[dict] = []
     for product in new_products:
@@ -1148,19 +1064,7 @@ async def run_cdiscount_competitor_analysis(
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
-    if _skip_cache:
-        new_products = products[:count]
-    else:
-        seen_new = []
-        for _p in products:
-            _pid = str(_p.get("product_id", ""))
-            if _pid and not await product_exists("cdiscount", _pid):
-                seen_new.append(_p)
-            if len(seen_new) >= count:
-                break
-        new_products = seen_new
-        if not new_products:
-            raise RuntimeError("所有搜索结果均已分析过，未找到新商品")
+    new_products = products[:count]
 
     rows: list[dict] = []
     for product in new_products:
@@ -1283,19 +1187,7 @@ async def run_aliexpress_competitor_analysis(
     if not products:
         raise RuntimeError("没有抓取到有效商品")
 
-    if _skip_cache:
-        new_products = products[:count]
-    else:
-        seen_new = []
-        for _p in products:
-            _pid = str(_p.get("product_id", ""))
-            if _pid and not await product_exists("aliexpress", _pid):
-                seen_new.append(_p)
-            if len(seen_new) >= count:
-                break
-        new_products = seen_new
-        if not new_products:
-            raise RuntimeError("所有搜索结果均已分析过，未找到新商品")
+    new_products = products[:count]
 
     rows: list[dict] = []
     for product in new_products:
