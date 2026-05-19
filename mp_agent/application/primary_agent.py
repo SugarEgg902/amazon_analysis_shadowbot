@@ -87,7 +87,8 @@ def _normalize_slot_value(key: str, value):
         }
         return platform_aliases.get(compact, compact)
     if key == "brand":
-        return _clean_text(value)
+        text = _clean_text(value)
+        return text.lower() if text else None
     if key == "count":
         return _normalize_count(value)
     return value
@@ -161,6 +162,7 @@ def _history_to_messages(messages, slots) -> list[dict]:
         "你是电商竞品分析主代理。"
         "你只能决定是继续追问，还是调用高层平台工作流工具。"
         "你必须只根据用户明确输入来识别 platform、brand(搜索关键词)、count，禁止猜测或脑补。"
+        "brand 必须原封不动使用用户输入的原始字符，禁止拼写纠正或规范化。"
         "如果信息不完整，不要调用工具，直接输出 JSON："
         '{"message":"给用户看的追问","slot_updates":{"platform":"已确认的平台或省略","brand":"已确认的搜索词或省略","count":已确认数量或省略}}。'
         "如果信息完整且平台受支持，调用对应工具。"
@@ -194,6 +196,7 @@ def _build_slot_extraction_messages(messages: list[dict]) -> list[dict]:
         "你是电商竞品分析主代理。"
         "你的当前任务只有一个：从用户明确说出的内容里识别 platform、brand(搜索关键词)、count。"
         "不要猜测，不要脑补，不要因为常识补全缺失字段。"
+        "brand 必须原封不动使用用户输入的原始字符，禁止拼写纠正或规范化。"
         "如果某个字段用户没有明确说，就不要填。"
         "只返回 JSON："
         '{"message":"如果信息不完整时给用户的追问；如果信息完整可留空","slot_updates":{"platform":"明确提到的平台或省略","brand":"明确提到的搜索关键词或省略","count":明确提到的数量或省略}}。'

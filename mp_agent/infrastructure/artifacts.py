@@ -393,7 +393,7 @@ def write_analysis_csv(rows: list[dict], brand: str, count: int, output_dir=None
 
 async def _query_analysis_rows(platform: str, keyword: str, count: int) -> list[dict]:
     """Query DB for the latest analysis rows for a given platform + keyword."""
-    from sqlalchemy import select, desc
+    from sqlalchemy import select, desc, func
     from mp_agent.dao.db import get_async_session
     from mp_agent.dao.models import PlatformProduct, PlatformProductDetail, AnalysisResult
 
@@ -402,7 +402,7 @@ async def _query_analysis_rows(platform: str, keyword: str, count: int) -> list[
             select(PlatformProduct, PlatformProductDetail, AnalysisResult)
             .join(PlatformProductDetail, PlatformProductDetail.product_id == PlatformProduct.id, isouter=True)
             .join(AnalysisResult, AnalysisResult.product_id == PlatformProduct.id, isouter=True)
-            .where(PlatformProduct.platform == platform, PlatformProduct.keyword == keyword)
+            .where(PlatformProduct.platform == platform, func.lower(PlatformProduct.keyword) == keyword.lower())
             .order_by(desc(PlatformProduct.crawl_time))
             .limit(count)
         )

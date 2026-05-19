@@ -164,7 +164,7 @@ async def get_latest_crawl_time(platform: str, keyword: str) -> datetime | None:
         result = await session.execute(
             select(func.max(PlatformProduct.crawl_time)).where(
                 PlatformProduct.platform == platform,
-                PlatformProduct.keyword == keyword,
+                func.lower(PlatformProduct.keyword) == keyword.lower(),
             )
         )
         return result.scalar_one_or_none()
@@ -176,7 +176,7 @@ async def has_running_crawl_task(platform: str, keyword: str) -> bool:
         result = await session.execute(
             select(CrawlTask.id).where(
                 CrawlTask.platform == platform,
-                CrawlTask.keyword == keyword,
+                func.lower(CrawlTask.keyword) == keyword.lower(),
                 CrawlTask.status == "running",
             )
         )
