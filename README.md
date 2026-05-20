@@ -3,12 +3,16 @@
 基于 LLM 的电商竞品分析 Agent，支持 10 大平台自然语言驱动的竞品搜索、数据采集、AI 评论摘要、CSV 导出，并将结果持久化到 MySQL 数据库供历史趋势分析。
 
 ---
-
+## 运行实例
+![logo](/example_img/97ad7eaadb461f2309bede04d9fb1dae.png)
+![logo2](/example_img/a4f22a22ed7387826f37fa02bbdca7dc.png)
+![logo2](/example_img/bd422c4f46f7932bacbc6e8c1fb701bb.png)
+![logo2](/example_img/d2b72682ac8aaffcabd4ab59dbab78b4.png)
 ## 功能列表
 
 ### 竞品分析
 - 自然语言输入，自动识别平台、品牌、数量，无需填表
-- 支持 9 大电商平台（见下方平台列表）
+- 支持 10 大电商平台（见下方平台列表）
 - 每个商品自动采集：标题、价格、评分、评论数、销量估算、卖点
 - LLM 自动总结买家评论的优缺点，生成竞品定位分析
 - 结果导出为带时间戳的 CSV 文件
