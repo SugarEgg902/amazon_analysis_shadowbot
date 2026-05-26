@@ -388,6 +388,19 @@ async def scrape_worten_products(
             page += 1
             continue
 
+        if not stubs and page == 1:
+            print("[worten search] page 1 returned no products, retrying once...")
+            try:
+                html = await _fetch(url)
+                stubs = _parse_search_page(html, keyword)
+            except Exception as e:
+                print(f"[worten search] page 1 retry error: {e}")
+
+        if not stubs:
+            print(f"[worten search] page {page} empty, skipping")
+            page += 1
+            continue
+
         for stub in stubs:
             if len(valid) >= max_valid:
                 break

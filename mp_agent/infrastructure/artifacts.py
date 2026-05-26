@@ -207,6 +207,8 @@ WORTEN_CSV_COLUMNS = [
     "评分",
     "评论数",
     "库存状态",
+    "总销量估算",
+    "总销售额估算",
     "核心卖点",
     "优点评炼",
     "缺点评炼",
@@ -229,6 +231,8 @@ EPRICE_CSV_COLUMNS = [
     "卖家",
     "库存状态",
     "规格参数",
+    "总销量估算",
+    "总销售额估算",
     "核心卖点",
     "优点评炼",
     "缺点评炼",
@@ -629,6 +633,8 @@ async def _query_analysis_rows(platform: str, keyword: str, count: int) -> list[
                     "价格(USD)": f"${price_usd:.2f}" if price_usd else "",
                     "品牌": extra.get("brand", ""),
                     "库存状态": extra.get("stock_status", ""),
+                    "总销量估算": extra.get("total_sales_estimate", ""),
+                    "总销售额估算": extra.get("total_revenue_estimate", ""),
                 })
             if platform == "eprice":
                 price_usd = extra.get("price_usd")
@@ -641,6 +647,8 @@ async def _query_analysis_rows(platform: str, keyword: str, count: int) -> list[
                     "卖家": extra.get("seller", ""),
                     "库存状态": extra.get("stock_status", ""),
                     "规格参数": extra.get("specs", ""),
+                    "总销量估算": extra.get("total_sales_estimate", ""),
+                    "总销售额估算": extra.get("total_revenue_estimate", ""),
                 })
             rows.append(row)
         return rows

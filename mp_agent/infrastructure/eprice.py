@@ -165,8 +165,9 @@ def _parse_search_page(html: str, keyword: str) -> list[dict]:
 
 def _parse_detail_page(html: str) -> dict:
     """
-    Extract description and full specs from the detail page.
+    Extract description, full specs, and reviews from the detail page.
     JSON-LD BuyAction contains: sku, name, description, price, availability.
+    JSON-LD (no @type) contains: review[] with reviewBody, headline, reviewRating.
     HTML specs table: <li><span>key</span><strong>val</strong></li>
     """
     ld_blocks = re.findall(
@@ -177,12 +178,16 @@ def _parse_detail_page(html: str) -> dict:
     name = sku = description = ""
     price_eur: float | None = None
     in_stock = True
+    raw_reviews: list[dict] = []
 
     for block in ld_blocks:
         try:
             obj = json.loads(block.strip())
         except Exception:
             continue
+        # Reviews block: no @type but has "review" array
+        if not obj.get("@type") and obj.get("review"):
+            raw_reviews = obj["review"] if isinstance(obj["review"], list) else []
         if obj.get("@type") != "BuyAction":
             continue
         prod = obj.get("object") or {}
@@ -217,6 +222,7 @@ def _parse_detail_page(html: str) -> dict:
         "specs": specs,
         "price_eur": price_eur,
         "in_stock": in_stock,
+        "raw_reviews": raw_reviews,
     }
 
 
@@ -238,6 +244,45 @@ def _llm_analyze_product(product: dict) -> dict:
         f"评分：{product.get('rating', '')}\n"
         f"评论数：{product.get('review_count', '')}\n"
         f"描述：{(product.get('description') or '')[:500]}\n"
+        "请输出 JSON。"
+    )
+    resp = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.3,
+        response_format={"type": "json_object"},
+    )
+    raw = resp.choices[0].message.content or "{}"
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = {"overall": raw}
+    return {
+        "pros": parsed.get("pros", []) or [],
+        "cons": parsed.get("cons", []) or [],
+        "overall": parsed.get("overall", "") or "",
+    }
+
+
+def _llm_summarize(positive: list[str], negative: list[str], product: dict) -> dict:
+    from openai import OpenAI
+
+    client = OpenAI(base_url=LLM_BASE_URL, api_key="EMPTY")
+    pos_text = "\n".join(f"- {t}" for t in positive[:20])
+    neg_text = "\n".join(f"- {t}" for t in negative[:10])
+    sys_prompt = (
+        "你是一个电商竞品分析助手。"
+        "根据意大利语买家评论（正面和负面），用简体中文总结优缺点和综合分析。"
+        "输出严格的 JSON，字段为 pros(string数组，每条15-30字)、cons(string数组，每条15-30字)、"
+        "overall(一段中文分析，100-150字)。只输出 JSON，不要任何额外说明。"
+    )
+    user_prompt = (
+        f"商品：{product.get('title', '')}\n"
+        f"正面评论（{len(positive)}条）：\n{pos_text or '无'}\n\n"
+        f"负面评论（{len(negative)}条）：\n{neg_text or '无'}\n\n"
         "请输出 JSON。"
     )
     resp = client.chat.completions.create(
@@ -290,6 +335,19 @@ async def scrape_eprice_products(
             page += 1
             continue
 
+        if not stubs and page == 1:
+            print("[eprice search] page 1 returned no products, retrying once...")
+            try:
+                html = await _fetch(url)
+                stubs = _parse_search_page(html, keyword)
+            except Exception as e:
+                print(f"[eprice search] page 1 retry error: {e}")
+
+        if not stubs:
+            print(f"[eprice search] page {page} empty, skipping")
+            page += 1
+            continue
+
         for stub in stubs:
             if len(valid) >= max_valid:
                 break
@@ -323,6 +381,7 @@ async def scrape_eprice_products(
             specs = detail.get("specs") or stub.get("specs", "")
             review_count = stub.get("review_count", 0)
             rating = stub.get("rating", "")
+            raw_reviews = detail.get("raw_reviews") or []
 
             total_sales, total_revenue = _estimate_total_sales(review_count, price_usd, title)
 
@@ -347,6 +406,7 @@ async def scrape_eprice_products(
                 "specs": specs,
                 "in_stock": in_stock,
                 "stock_status": "有货" if in_stock else "缺货",
+                "raw_reviews": raw_reviews,
                 "总销量估算": total_sales,
                 "总销售额估算": total_revenue,
                 "monthly_sales_estimate": "",
@@ -377,7 +437,49 @@ async def scrape_eprice_reviews(
     sku: str,
     product_url: str,
     max_reviews: int = 60,
+    _raw_reviews: list[dict] | None = None,
 ) -> dict:
-    # ePrice does not expose a public review API.
-    print(f"[eprice reviews] {sku}: no public review API available")
-    return {"pros": [], "cons": [], "overall": ""}
+    """
+    Extract reviews from the detail page JSON-LD (no separate API needed).
+    Reviews are embedded in a JSON-LD block with a 'review' array.
+    Falls back to LLM product analysis if no reviews found.
+    """
+    raw = _raw_reviews
+    if raw is None:
+        print(f"[eprice reviews] {sku}: fetching detail page for reviews")
+        try:
+            html = await _fetch(product_url)
+            detail = _parse_detail_page(html)
+            raw = detail.get("raw_reviews") or []
+        except Exception as e:
+            print(f"[eprice reviews] {sku}: fetch error: {e}")
+            raw = []
+
+    if not raw:
+        print(f"[eprice reviews] {sku}: no reviews in page")
+        return {"pros": [], "cons": [], "overall": ""}
+
+    positive: list[str] = []
+    negative: list[str] = []
+    for rv in raw[:max_reviews]:
+        try:
+            rating_val = int(rv.get("reviewRating", {}).get("ratingValue") or 0)
+        except (ValueError, TypeError):
+            rating_val = 0
+        headline = (rv.get("headline") or "").strip()
+        body = (rv.get("reviewBody") or "").strip()
+        text = f"{headline}. {body}" if headline and body else (headline or body)
+        text = text[:600]
+        if not text:
+            continue
+        if rating_val >= 4:
+            positive.append(text)
+        else:
+            negative.append(text)
+
+    print(f"[eprice reviews] {sku}: {len(positive)} positive, {len(negative)} negative")
+    if not positive and not negative:
+        return {"pros": [], "cons": [], "overall": ""}
+
+    import asyncio as _asyncio
+    return await _asyncio.to_thread(_llm_summarize, positive, negative, {"title": sku})

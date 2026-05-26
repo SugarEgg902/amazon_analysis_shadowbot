@@ -1613,6 +1613,8 @@ async def run_worten_competitor_analysis(
         row["评分"] = product.get("rating", "")
         row["评论数"] = product.get("review_count", "")
         row["库存状态"] = product.get("stock_status", "")
+        row["总销量估算"] = product.get("total_sales_estimate", "")
+        row["总销售额估算"] = product.get("total_revenue_estimate", "")
 
         try:
             _product_db_id = await upsert_product({
@@ -1634,6 +1636,8 @@ async def run_worten_competitor_analysis(
                 "bullets": product.get("bullets"),
                 "stock_status": product.get("stock_status"),
                 "price_usd": product.get("price_usd"),
+                "total_sales_estimate": product.get("total_sales_estimate"),
+                "total_revenue_estimate": product.get("total_revenue_estimate"),
             })
             await save_snapshot(_product_db_id, "worten", str(product_id), {
                 "title": product.get("title"),
@@ -1715,7 +1719,10 @@ async def run_eprice_competitor_analysis(
         await emit({"type": "tool_status", "tool": "run_eprice_competitor_analysis",
                     "message": f"正在分析 {product_id} ..."})
         try:
-            review_summary = await scrape_reviews_fn(product_id, product_url)
+            review_summary = await scrape_reviews_fn(
+                product_id, product_url,
+                _raw_reviews=product.get("raw_reviews"),
+            )
         except Exception:
             review_summary = {"pros": [], "cons": [], "overall": ""}
 
@@ -1738,6 +1745,8 @@ async def run_eprice_competitor_analysis(
         row["卖家"] = product.get("seller", "")
         row["库存状态"] = product.get("stock_status", "")
         row["规格参数"] = product.get("specs", "")
+        row["总销量估算"] = product.get("total_sales_estimate", "")
+        row["总销售额估算"] = product.get("total_revenue_estimate", "")
 
         try:
             _product_db_id = await upsert_product({
@@ -1763,6 +1772,8 @@ async def run_eprice_competitor_analysis(
                 "price_usd": product.get("price_usd"),
                 "original_price_eur": product.get("original_price_eur"),
                 "discount_pct": product.get("discount_pct"),
+                "total_sales_estimate": product.get("total_sales_estimate"),
+                "total_revenue_estimate": product.get("total_revenue_estimate"),
             })
             await save_snapshot(_product_db_id, "eprice", str(product_id), {
                 "title": product.get("title"),
